@@ -1,0 +1,22 @@
+# Core numerics
+numpy>=1.26
+scipy>=1.11
+
+# Geometry / mesh handling
+trimesh>=4.0
+scikit-image>=0.22
+shapely>=2.0
+networkx>=3.0
+mapbox-earcut>=1.0  # triangulation engine used when generating test shapes
+
+# Optional (but recommended) algebraic-multigrid preconditioner.
+# Makes large FEA solves several times faster. Pure pip wheel, no system deps.
+pyamg>=5.0
+
+# Web app
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+
+# Tests
+pytest>=8.0

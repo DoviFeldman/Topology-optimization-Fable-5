@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Topology Optimizer</title>
+<style>
+  :root {
+    --bg: #101318; --panel: #181d25; --panel2: #1f2632; --text: #e8ecf1;
+    --muted: #8b96a5; --accent: #4f8ef7; --accent2: #34d399; --border: #2a3342;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden; }
+  #sidebar { width: 320px; min-width: 320px; background: var(--panel); border-right: 1px solid var(--border); padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 17px; font-weight: 650; letter-spacing: .2px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 12px; line-height: 1.45; }
+  #drop { border: 2px dashed var(--border); border-radius: 10px; padding: 22px 14px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+  #drop.drag { border-color: var(--accent); background: #1a2436; }
+  #drop .big { font-size: 14px; font-weight: 600; }
+  #drop .small { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  #fileinfo { font-size: 12px; color: var(--accent2); word-break: break-all; }
+  label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 4px; }
+  label b { color: var(--text); font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 8px; font-size: 13px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .group { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  button { border: 0; border-radius: 8px; padding: 11px; font-size: 14px; font-weight: 650; cursor: pointer; transition: filter .15s; }
+  button:hover:not(:disabled) { filter: brightness(1.12); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #run { background: var(--accent); color: #fff; }
+  #download { background: var(--accent2); color: #06281c; display: none; }
+  #progresswrap { display: none; flex-direction: column; gap: 6px; }
+  #bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+  #barfill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .4s; }
+  #phase { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+  #status { font-size: 12px; color: var(--muted); min-height: 16px; }
+  #status.err { color: #f87171; }
+  #viewer { flex: 1; position: relative; }
+  #canvas3d { position: absolute; inset: 0; }
+  #viewtabs { position: absolute; top: 14px; left: 14px; display: flex; gap: 6px; z-index: 5; }
+  .tab { background: rgba(24,29,37,.85); border: 1px solid var(--border); color: var(--muted); font-size: 12px; padding: 6px 12px; border-radius: 6px; cursor: pointer; backdrop-filter: blur(4px); }
+  .tab.active { color: var(--text); border-color: var(--accent); }
+  .tab.hidden { display: none; }
+  #hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--muted); background: rgba(24,29,37,.7); padding: 5px 12px; border-radius: 6px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <div>
+    <h1>Topology <span>Optimizer</span></h1>
+    <div class="sub">Upload an STL, click Optimize, download a smooth organically-optimized printable STL.</div>
+  </div>
+
+  <div id="drop">
+    <div class="big">Drop STL here</div>
+    <div class="small">or click to choose a file</div>
+    <input type="file" id="file" accept=".stl" hidden>
+  </div>
+  <div id="fileinfo"></div>
+
+  <div class="group">
+    <h2>Optimization</h2>
+    <div>
+      <label>Resolution <b id="resv">96</b></label>
+      <input type="range" id="res" min="24" max="160" step="8" value="96">
+    </div>
+    <div>
+      <label>Keep material <b id="volv">35%</b></label>
+      <input type="range" id="vol" min="10" max="80" step="5" value="35">
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>Boundary conditions</h2>
+    <div class="row">
+      <div>
+        <label>Fixed face</label>
+        <select id="fix">
+          <option value="bottom" selected>bottom</option><option value="top">top</option>
+          <option value="left">left</option><option value="right">right</option>
+          <option value="front">front</option><option value="back">back</option>
+        </select>
+      </div>
+      <div>
+        <label>Loaded face</label>
+        <select id="loadface">
+          <option value="top" selected>top</option><option value="bottom">bottom</option>
+          <option value="left">left</option><option value="right">right</option>
+          <option value="front">front</option><option value="back">back</option>
+        </select>
+      </div>
+    </div>
+    <div>
+      <label>Load direction</label>
+      <select id="dir">
+        <option value="-z" selected>-z (down)</option><option value="+z">+z (up)</option>
+        <option value="-x">-x</option><option value="+x">+x</option>
+        <option value="-y">-y</option><option value="+y">+y</option>
+      </select>
+    </div>
+  </div>
+
+  <button id="run" disabled>Optimize</button>
+
+  <div id="progresswrap">
+    <div id="phase"><span id="phasename">queued</span><span id="phaseiter"></span></div>
+    <div id="bar"><div id="barfill"></div></div>
+  </div>
+
+  <button id="download">Download optimized STL</button>
+  <div id="status"></div>
+</div>
+
+<div id="viewer">
+  <div id="viewtabs">
+    <div class="tab active" id="tabInput">Input</div>
+    <div class="tab hidden" id="tabResult">Result</div>
+  </div>
+  <div id="canvas3d"></div>
+  <div id="hint">drag to rotate &middot; scroll to zoom &middot; right-drag to pan</div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+// ---------- 3D viewer ----------
+const container = document.getElementById('canvas3d');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101318);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+container.appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x1c2030, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(1, 2, 1.5); scene.add(key);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.7); rim.position.set(-1.5, -1, -1); scene.add(rim);
+
+const matInput = new THREE.MeshStandardMaterial({ color: 0x9aa7b8, metalness: 0.15, roughness: 0.55 });
+const matResult = new THREE.MeshStandardMaterial({ color: 0x4f8ef7, metalness: 0.3, roughness: 0.35 });
+
+let inputMesh = null, resultMesh = null, activeView = 'input';
+
+function resize() {
+  const w = container.clientWidth, h = container.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(container); resize();
+(function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); })();
+
+function frameObject(mesh) {
+  const box = new THREE.Box3().setFromObject(mesh);
+  const size = box.getSize(new THREE.Vector3()).length();
+  const center = box.getCenter(new THREE.Vector3());
+  controls.target.copy(center);
+  camera.position.copy(center).add(new THREE.Vector3(0.7, 0.5, 1).normalize().multiplyScalar(size * 1.4));
+  camera.near = size / 500; camera.far = size * 20; camera.updateProjectionMatrix();
+}
+
+function showMesh(which) {
+  activeView = which;
+  if (inputMesh) inputMesh.visible = which === 'input';
+  if (resultMesh) resultMesh.visible = which === 'result';
+  document.getElementById('tabInput').classList.toggle('active', which === 'input');
+  document.getElementById('tabResult').classList.toggle('active', which === 'result');
+}
+
+function setGeometry(which, geometry) {
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, which === 'input' ? matInput : matResult);
+  // STL files are usually z-up; Three.js viewer is y-up
+  mesh.rotation.x = -Math.PI / 2;
+  if (which === 'input') { if (inputMesh) scene.remove(inputMesh); inputMesh = mesh; }
+  else { if (resultMesh) scene.remove(resultMesh); resultMesh = mesh; }
+  scene.add(mesh);
+  frameObject(mesh);
+  showMesh(which);
+}
+
+// ---------- upload & controls ----------
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const runBtn = document.getElementById('run');
+const dlBtn = document.getElementById('download');
+const statusEl = document.getElementById('status');
+let currentFile = null, currentJob = null, pollTimer = null;
+
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('drag');
+  if (e.dataTransfer.files.length) acceptFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) acceptFile(fileInput.files[0]); });
+
+function acceptFile(f) {
+  if (!/\.stl$/i.test(f.name)) { setStatus('Please choose an .stl file', true); return; }
+  currentFile = f;
+  document.getElementById('fileinfo').textContent =
+    `${f.name} (${(f.size / 1048576).toFixed(1)} MB)`;
+  runBtn.disabled = false;
+  setStatus('');
+  f.arrayBuffer().then(buf => setGeometry('input', new STLLoader().parse(buf)));
+}
+
+const res = document.getElementById('res'), vol = document.getElementById('vol');
+res.addEventListener('input', () => document.getElementById('resv').textContent = res.value);
+vol.addEventListener('input', () => document.getElementById('volv').textContent = vol.value + '%');
+
+function setStatus(msg, isErr = false) {
+  statusEl.textContent = msg;
+  statusEl.className = isErr ? 'err' : '';
+}
+
+runBtn.addEventListener('click', async () => {
+  if (!currentFile) return;
+  const fd = new FormData();
+  fd.append('file', currentFile);
+  fd.append('resolution', res.value);
+  fd.append('volfrac', (vol.value / 100).toString());
+  fd.append('fix_face', document.getElementById('fix').value);
+  fd.append('load_face', document.getElementById('loadface').value);
+  fd.append('load_dir', document.getElementById('dir').value);
+  runBtn.disabled = true;
+  dlBtn.style.display = 'none';
+  document.getElementById('tabResult').classList.add('hidden');
+  document.getElementById('progresswrap').style.display = 'flex';
+  setStatus('Uploading…');
+  try {
+    const r = await fetch('/api/jobs', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    currentJob = (await r.json()).id;
+    setStatus('');
+    pollTimer = setInterval(poll, 1200);
+  } catch (err) {
+    setStatus('Upload failed: ' + err.message, true);
+    runBtn.disabled = false;
+    document.getElementById('progresswrap').style.display = 'none';
+  }
+});
+
+// phases mapped onto the progress bar: optimizing owns 15..85%
+const PHASE_BASE = { queued: 2, loading: 6, voxelizing: 10, optimizing: 15, meshing: 88, exporting: 95, done: 100 };
+
+async function poll() {
+  try {
+    const r = await fetch(`/api/jobs/${currentJob}`);
+    if (!r.ok) throw new Error('job lost');
+    const j = await r.json();
+    let pct = PHASE_BASE[j.phase] ?? 2;
+    let iterText = '';
+    if (j.phase === 'optimizing' && j.total_iterations > 0) {
+      pct = 15 + 70 * (j.iteration / j.total_iterations);
+      iterText = `iter ${j.iteration}/${j.total_iterations}` +
+        (j.compliance ? ` · C=${j.compliance.toExponential(2)}` : '');
+    }
+    if (j.status === 'queued' && j.queue_position > 1) iterText = `#${j.queue_position} in queue`;
+    document.getElementById('phasename').textContent = j.phase;
+    document.getElementById('phaseiter').textContent = iterText;
+    document.getElementById('barfill').style.width = pct + '%';
+    if (j.status === 'done') {
+      clearInterval(pollTimer);
+      document.getElementById('barfill').style.width = '100%';
+      setStatus(`Done in ${j.elapsed_seconds}s — ${j.result.faces.toLocaleString()} faces, watertight: ${j.result.watertight}`);
+      runBtn.disabled = false;
+      dlBtn.style.display = 'block';
+      document.getElementById('tabResult').classList.remove('hidden');
+      const buf = await (await fetch(`/api/jobs/${currentJob}/preview`)).arrayBuffer();
+      setGeometry('result', new STLLoader().parse(buf));
+    } else if (j.status === 'error') {
+      clearInterval(pollTimer);
+      setStatus('Optimization failed: ' + j.error, true);
+      runBtn.disabled = false;
+      document.getElementById('progresswrap').style.display = 'none';
+    }
+  } catch (err) {
+    clearInterval(pollTimer);
+    setStatus(err.message, true);
+    runBtn.disabled = false;
+  }
+}
+
+dlBtn.addEventListener('click', () => { location.href = `/api/jobs/${currentJob}/result`; });
+document.getElementById('tabInput').addEventListener('click', () => showMesh('input'));
+document.getElementById('tabResult').addEventListener('click', () => showMesh('result'));
+</script>
+</body>
+</html>
