@@ -1,0 +1,109 @@
+# Coding Agent Prompt: 3D Topology Optimizer Web App
+
+Copy everything below this line and give it to your coding agent.
+
+---
+
+## Project: STL-in → Smooth Optimized STL-out Topology Optimizer
+
+Build a complete, working 3D topology optimization web application in **Python**. It takes a real-world STL file as input, runs a SIMP-based topology optimization, and outputs a **smooth, watertight, printable STL** with an organic, optimized look. It must run on a standard Linux VPS and also work in GitHub Codespaces or any typical Python dev environment (no GPU required, no OS-specific dependencies).
+
+## Core Quality Bar (non-negotiable)
+
+1. **Output smoothness is the #1 priority.** The final STL must show ZERO visible voxel/staircase artifacts. Achieve this via marching cubes on the continuous density field followed by Taubin smoothing (not plain Laplacian alone, to avoid shrinkage). The result should look like the classic "organic optimized bracket" aesthetic.
+2. **Output must be watertight and manifold** — verify with trimesh (`mesh.is_watertight`) before returning it. If not watertight, repair it (fill holes, keep largest connected component, remove degenerate faces).
+3. **Must handle real-world STLs**, including messy ones with up to ~1–2 million triangles. Input triangle count must not blow up memory or runtime — voxelize once, then discard the input mesh from the pipeline.
+4. **Structural accuracy can be approximate.** This is for cool 3D-printed shapes, not certified engineering. Prioritize robustness, speed, and beauty over FEA precision. It should still be a real SIMP optimization (compliance minimization), not a fake filter.
+5. **It must never return a broken result.** Every run on a valid closed STL must produce a printable file. Handle edge cases: non-manifold inputs (attempt repair with trimesh before voxelizing), tiny/huge models (normalize scale internally, restore original scale on export), disconnected results (keep largest connected component).
+
+## Tech Stack (use exactly this — all pure-Python/pip installable)
+
+- **Python 3.11+**
+- **numpy**, **scipy** (sparse solvers for FEA)
+- **trimesh** (STL load/save, voxelization, repair, watertight checks)
+- **scikit-image** (marching cubes)
+- **FastAPI + uvicorn** (backend API)
+- **Three.js** (single static HTML/JS frontend page — no build step, no React, load Three.js from CDN)
+- No Docker required to run, but include a Dockerfile anyway for easy VPS deployment.
+- Everything installs with `pip install -r requirements.txt`. No compiled extensions beyond what those libraries ship as wheels.
+
+## Pipeline (implement in this exact order)
+
+### 1. Input & Voxelization
+- Accept STL upload (binary or ASCII).
+- Repair with trimesh if needed (fill holes, fix normals, fix winding).
+- Normalize the model to a unit bounding box internally; remember the transform to restore real-world scale on export.
+- Voxelize the interior into a solid occupancy grid. Default resolution: **longest axis = 96 voxels** (configurable 48–160 via a parameter). Use `trimesh.voxel` or a ray/parity fill — must produce a *solid* fill, not just a shell.
+
+### 2. Boundary Conditions (keep it simple and automatic, with overrides)
+- Default automatic mode: fix the bottom Z-layer of occupied voxels (supports), apply a distributed downward load on the top Z-layer of occupied voxels. This gives good-looking results with zero user setup.
+- Also expose optional parameters so the user can choose which face (top/bottom/left/right/front/back) is fixed and which face is loaded, and the load direction (±X, ±Y, ±Z).
+- Loads/supports snap to the nearest occupied voxels of the chosen face region.
+
+### 3. SIMP Topology Optimization (3D)
+- Implement the standard 3D SIMP method (port of the well-known top3d approach):
+  - 8-node hexahedral elements, linear elasticity, one global stiffness matrix assembled sparse.
+  - Penalization p = 3, density filter (radius ~1.5–2.5 elements, configurable) to prevent checkerboarding.
+  - Optimality Criteria update.
+  - Target volume fraction configurable, default **0.35** (i.e., keep 35% of material).
+  - Convergence: stop at max 60 iterations or density change < 0.01.
+- Solve the linear system with `scipy.sparse.linalg` (use `cg` with a diagonal/jacobi preconditioner, or `splu` for smaller grids — pick based on DOF count).
+- Only build DOFs for occupied voxels (do NOT assemble the full bounding box) — this is critical for memory on real shapes.
+- Memory budget: must run within ~8 GB RAM at default resolution.
+
+### 4. Smooth Surface Extraction (the money step — do not cut corners here)
+- Optionally upsample the final density field 2× with trilinear interpolation before meshing (configurable, default on) for extra smoothness.
+- Apply a light Gaussian blur (sigma ≈ 1 voxel) to the density field.
+- Run marching cubes (`skimage.measure.marching_cubes`) at iso-level 0.5 on the density field.
+- Apply **Taubin smoothing** (e.g., `trimesh.smoothing.filter_taubin`, ~10–30 iterations) to remove any remaining faceting without shrinking the model.
+- Keep only the largest connected component.
+- Verify watertight; repair if needed.
+- Restore original scale/position and export binary STL.
+
+### 5. Web App
+- **FastAPI backend** with endpoints:
+  - `POST /api/jobs` — upload STL + parameters (resolution, volume fraction, load/support faces, load direction). Returns a job ID. Run optimization in a background task/thread (jobs take 1–10 minutes; must not block the server).
+  - `GET /api/jobs/{id}` — status + progress (current iteration / total, current compliance value, phase name like "voxelizing", "optimizing", "meshing").
+  - `GET /api/jobs/{id}/result` — download the optimized STL.
+  - `GET /api/jobs/{id}/preview` — the result mesh as a compact format the frontend can render (e.g., draco-free simple JSON or binary STL is fine).
+- Simple in-memory job store is fine (single-user tool). Limit to 1 concurrent optimization job; queue additional ones.
+- **Frontend**: one static page served by FastAPI:
+  - Drag-and-drop STL upload.
+  - Three.js viewer showing the input mesh, then the optimized result when done (orbit controls, nice lighting, matcap or standard material — make it look good).
+  - Controls: resolution slider, volume fraction slider, dropdowns for fixed face / loaded face / load direction.
+  - Live progress bar with phase + iteration count.
+  - Download button for the result STL.
+
+### 6. CLI mode (for Codespaces / headless use)
+- Also provide `python optimize.py input.stl output.stl --resolution 96 --volfrac 0.35 --fix bottom --load top --dir -z`
+- Same pipeline, prints progress to terminal.
+
+## Deployment Requirements
+
+- Runs with plain `uvicorn main:app --host 0.0.0.0 --port 8000` on Ubuntu VPS.
+- Include a `Dockerfile` and a short `deploy.md` covering: VPS setup (Ubuntu 22.04+), systemd service example, and optional nginx reverse proxy snippet.
+- Must also run out-of-the-box in GitHub Codespaces: include `.devcontainer/devcontainer.json` that installs requirements and forwards port 8000.
+
+## Testing & Acceptance Criteria
+
+Include a `tests/` folder and a `make_test_shapes.py` script that generates 2–3 test STLs with trimesh (e.g., a box, a box with a hole, an L-bracket). The project is DONE only when:
+
+1. Running the CLI on the L-bracket at resolution 96, volfrac 0.35 produces a watertight STL in under ~10 minutes on a 4-core CPU.
+2. The output STL has no visible voxel staircase (verify visually + assert Taubin smoothing ran).
+3. `trimesh.load(output).is_watertight` is True for all test shapes.
+4. A 1M+ triangle input STL (subdivide a test shape to create one) voxelizes without exceeding memory and completes the pipeline.
+5. The web UI works end-to-end: upload → progress updates → 3D preview → download.
+6. All parameters have sane defaults so a user can upload an STL and click one button with zero configuration.
+
+## Code Quality
+
+- Clean module structure: `voxelize.py`, `fem.py`, `simp.py`, `meshing.py`, `main.py` (API), `optimize.py` (CLI), `static/` (frontend).
+- Type hints, docstrings on public functions, no dead code.
+- A clear `README.md`: what it does, how to run locally, in Codespaces, and on a VPS, with example screenshots section placeholder.
+
+Build the entire thing fully working — do not leave TODOs or stub functions.
+
+Push to main. 
+
+dont open any ports or deploy it on the VPS yet, just get it all ready to release and test so i can test it. 
+Include clear instructions everywhere so a simple person doing this for the first time knows exactly step by step what to do. 
