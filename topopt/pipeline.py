@@ -323,11 +323,18 @@ def run_pipeline(
     )
 
     report("meshing", message="marching cubes + Taubin smoothing")
+    # fine lattices get gentler smoothing — full-strength blur + Taubin wipes
+    # out struts only a couple voxels thick, exactly the ones that make the
+    # result look webby
     out_mesh, info = density_to_mesh(
         simp.density_grid,
         grid,
         upsample=params.upsample,
-        taubin_iterations=params.taubin_iterations,
+        gaussian_sigma=min(1.0, max(0.5, 0.5 * rmin_eff)),
+        taubin_iterations=(
+            params.taubin_iterations if rmin_eff >= 1.6
+            else max(8, params.taubin_iterations // 2)
+        ),
     )
 
     report("exporting", message="writing binary STL")

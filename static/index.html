@@ -41,6 +41,8 @@
   .chip.active { border-color: var(--accent); color: var(--text); background: var(--panel2); }
   .note { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
   label span[title] { cursor: help; opacity: .7; }
+  .info { cursor: help; opacity: .7; }
+  #tip { position: fixed; z-index: 60; max-width: 280px; background: var(--panel2); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--text); line-height: 1.5; box-shadow: 0 8px 24px rgba(0,0,0,.5); display: none; }
   #bclegend { position: absolute; top: 14px; right: 14px; z-index: 5; font-size: 11.5px; color: var(--muted); background: rgba(24,29,37,.85); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; display: none; line-height: 1.6; backdrop-filter: blur(4px); }
   #bclegend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
   #rotbar { position: absolute; top: 52px; left: 14px; z-index: 5; display: flex; gap: 4px; align-items: center; background: rgba(24,29,37,.85); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; backdrop-filter: blur(4px); }
@@ -186,7 +188,11 @@
       the material <i>between</i> the pads gets carved.<br>
       <b>Painting beats presets:</b> use the paint tools (top-left of the viewer)
       to brush exactly where the part is held (blue) and where the force lands
-      (orange) — painted spots are never carved and override the scenario faces.
+      (orange) — painted spots are never carved and override the scenario faces.<br>
+      <b>Want the full pro-spiderweb look?</b> It's mostly resolution — struts
+      get finer and more numerous as it grows. The showcase recipe: Skeletal +
+      ✳ woven + resolution 120–160, run on a real computer (a laptop is 5–10×
+      faster than this Codespace); expect 15–40 minutes there.
     </div>
   </details>
 
@@ -409,7 +415,7 @@ const PRESETS = {
   custom:  { hint: 'Blue = anchored. Orange circle = where the force lands, arrow = its direction. Smaller force area ⇒ more dramatic webs.' },
 };
 const STYLES = {
-  skeletal: { vol: 18, rmin: 1.4, ext: 15, cases: 5, shape: 15 },
+  skeletal: { vol: 15, rmin: 1.2, ext: 12, cases: 5, shape: 10 },
   balanced: { vol: 30, rmin: 1.8, ext: 25, cases: 3, shape: 35 },
   solid:    { vol: 45, rmin: 2.4, ext: 60, cases: 1, shape: 60 },
 };
@@ -751,6 +757,30 @@ async function reattach() {
   } catch { /* no server contact — normal page behavior */ }
 }
 reattach();
+
+// ---------- click-to-open tooltips (title= only shows on mouse hover) ----------
+const tipEl = document.createElement('div');
+tipEl.id = 'tip';
+document.body.appendChild(tipEl);
+let tipFor = null;
+function hideTip() { tipEl.style.display = 'none'; tipFor = null; }
+document.querySelectorAll('#sidebar span[title]').forEach(s => {
+  const text = s.getAttribute('title');
+  s.removeAttribute('title');  // native hover tooltip can't be tapped/clicked
+  s.classList.add('info');
+  s.addEventListener('click', e => {
+    e.preventDefault();  // don't toggle the checkbox/label underneath
+    e.stopPropagation();
+    if (tipFor === s) { hideTip(); return; }
+    tipFor = s;
+    tipEl.textContent = text;
+    tipEl.style.display = 'block';
+    const r = s.getBoundingClientRect();
+    tipEl.style.left = Math.max(8, Math.min(r.left, innerWidth - 296)) + 'px';
+    tipEl.style.top = Math.min(r.bottom + 6, innerHeight - tipEl.offsetHeight - 8) + 'px';
+  });
+});
+document.addEventListener('click', hideTip);
 </script>
 </body>
 </html>
