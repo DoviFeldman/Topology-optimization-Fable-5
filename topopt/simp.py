@@ -83,25 +83,33 @@ def simp_optimize(
     max_iter: int = 60,
     change_tol: float = 0.01,
     move: float = 0.2,
+    case_weights: np.ndarray | None = None,
+    min_density: np.ndarray | None = None,
     progress: ProgressFn | None = None,
 ) -> SimpResult:
     """Run the SIMP loop and return the final physical density field.
 
     Voxels within one cell of the load/support regions are kept passively
     solid so the boundary conditions always stay attached to material.
+
+    `load_dir` may be (ncases, 3) for multiple simultaneous load cases
+    (weighted by `case_weights`). `min_density` is an optional per-element
+    lower bound — e.g. a floor on the surface shell preserves the input's
+    silhouette wherever densities would otherwise drop to zero.
     """
     if not 0.05 <= volfrac <= 0.9:
         raise ValueError("volfrac must be within 0.05..0.9")
-    fem = FEModel(occ, fixed_vox, load_vox, load_dir)
+    fem = FEModel(occ, fixed_vox, load_vox, load_dir, case_weights=case_weights)
     filt = DensityFilter(occ, rmin)
 
     passive_grid = ndimage.binary_dilation(fixed_vox | load_vox, iterations=1) & occ
     passive = passive_grid[occ]
 
     nel = fem.nel
-    x = np.full(nel, volfrac)
+    floor = np.zeros(nel) if min_density is None else np.clip(min_density, 0.0, 1.0)
+    x = np.maximum(np.full(nel, volfrac), floor)
     x[passive] = 1.0
-    x_phys = filt.forward(x)
+    x_phys = np.maximum(filt.forward(x), floor)
     x_phys[passive] = 1.0
 
     dv = filt.backward(np.ones(nel))  # constant across iterations
@@ -123,8 +131,8 @@ def simp_optimize(
         dc = filt.backward(dc)
         np.minimum(dc, -1e-30, out=dc)
 
-        x_new = _oc_update(x, dc, dv, vol_target, move, passive)
-        x_phys = filt.forward(x_new)
+        x_new = _oc_update(x, dc, dv, vol_target, move, passive, floor)
+        x_phys = np.maximum(filt.forward(x_new), floor)
         x_phys[passive] = 1.0
         np.clip(x_phys, 0.0, 1.0, out=x_phys)
 
@@ -155,10 +163,11 @@ def _oc_update(
     vol_target: float,
     move: float,
     passive: np.ndarray,
+    floor: np.ndarray,
 ) -> np.ndarray:
     """Optimality Criteria update with bisection on the Lagrange multiplier."""
     l1, l2 = 0.0, 1e9
-    lower = np.maximum(x - move, 0.0)
+    lower = np.maximum(x - move, floor)
     upper = np.minimum(x + move, 1.0)
     x_new = x
     while (l2 - l1) / max(l2 + l1, 1e-30) > 1e-4:

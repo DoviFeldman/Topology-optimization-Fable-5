@@ -81,26 +81,52 @@ Progress prints to the terminal. All flags are optional; run
 | `--load` | top | face that carries the load |
 | `--dir` | -z | direction of the load (+x, -x, +y, -y, +z, -z) |
 | `--load-extent` | 0.25 | fraction of the loaded face carrying force (small patch ⇒ dramatic branching structures; 1.0 = whole face) |
+| `--load-cases` | 1 | 1, 3 or 5 force directions. One direction produces a single truss; several produce cross-braced internal webbing (N× slower) |
+| `--shape-preserve` | 0.0 | 0–1 density floor on the input's surface shell. The silhouette survives where it carries load and opens where it doesn't; 0.5+ keeps the skin everywhere |
+| `--expand` | 0.0 | 0–0.3: grow the buildable space outward, letting struts form outside the input shape |
 | `--rmin` | 2.0 | smoothing filter radius in voxels (1.5–2.5 sensible) |
 | `--max-iter` | 60 | max optimization iterations |
 
-### Getting the cool spiderweb look
+### Getting the "real topology-optimized print" look
 
-Blobs come from spread-out loads and high volume fractions. For striking
-organic structures: concentrate the load (`--load-extent 0.15`), keep less
-material (`--volfrac 0.18`), lower the filter radius (`--rmin 1.4`), and give
-the optimizer room to grow struts (`--resolution 96+`). Example — the classic
-bridge:
+Three failure modes, three cures:
+
+- **Blob** — the force is spread out and too much material is kept.
+  Concentrate it: `--load-extent 0.15 --volfrac 0.2`.
+- **Single stick / everything vanished** — one force direction only needs one
+  strut. Make it resist wobble: `--load-cases 3` (or 5), and protect the
+  silhouette with `--shape-preserve 0.35`.
+- **Chunky webs** — struts can't be thinner than a voxel: raise
+  `--resolution` to 96+, lower `--rmin` to 1.4.
+
+The showcase recipe (webby bridge that keeps its outline):
 
 ```bash
 python optimize.py test_shapes/beam.stl bridge.stl \
-    --fix left,right --load top --dir -z \
-    --load-extent 0.15 --volfrac 0.18 --rmin 1.4
+    --fix left,right --load top --dir -z --load-extent 0.15 \
+    --load-cases 3 --shape-preserve 0.35 --volfrac 0.22 --rmin 1.5
 ```
 
 The web UI wraps all of this in scenario presets (bridge / bracket / tower /
-hook) and skeletal-to-solid style chips, and draws the anchors and force
-arrow directly on your model.
+hook), skeletal-to-solid style chips, webbing chips, and "keep outer shape" /
+"extra build room" sliders — and draws the anchors and force arrow directly
+on your model.
+
+### macOS / Apple Silicon note
+
+An M1/M2 Mac is typically 5–10× faster than a small cloud container for this
+workload. On older macOS versions (e.g. Big Sur), plain `pip` may refuse
+recent NumPy/SciPy wheels (they target newer macOS). The reliable path is
+[Miniforge](https://github.com/conda-forge/miniforge) (arm64, supports
+macOS ≥ 11):
+
+```bash
+conda create -n topopt python=3.12
+conda activate topopt
+conda install numpy scipy scikit-image trimesh shapely networkx pyamg
+pip install fastapi 'uvicorn[standard]' python-multipart mapbox-earcut pytest
+uvicorn main:app --port 8000
+```
 
 ## Option D: Deploy on a VPS
 

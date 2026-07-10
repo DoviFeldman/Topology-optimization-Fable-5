@@ -45,6 +45,19 @@ def main(argv: list[str] | None = None) -> int:
         "--load-extent", type=float, default=0.25,
         help="fraction of the loaded face carrying force (1.0 = whole face)",
     )
+    parser.add_argument(
+        "--load-cases", type=int, choices=(1, 3, 5), default=1,
+        help="force directions (tilts around --dir); more = webbier, slower",
+    )
+    parser.add_argument(
+        "--shape-preserve", type=float, default=0.0,
+        help="0..1 density floor on the surface shell — keeps the input's "
+             "silhouette where it carries load (0.5+ keeps it everywhere)",
+    )
+    parser.add_argument(
+        "--expand", type=float, default=0.0, dest="domain_expand",
+        help="0..0.3: grow buildable space outward beyond the input shape",
+    )
     parser.add_argument("--rmin", type=float, default=2.0, help="filter radius in voxels")
     parser.add_argument("--max-iter", type=int, default=60, help="max SIMP iterations")
     parser.add_argument(
@@ -63,6 +76,9 @@ def main(argv: list[str] | None = None) -> int:
         load_face=args.load,
         load_dir=args.load_dir,
         load_extent=args.load_extent,
+        load_cases=args.load_cases,
+        shape_preserve=args.shape_preserve,
+        domain_expand=args.domain_expand,
         rmin=args.rmin,
         max_iter=args.max_iter,
         upsample=not args.no_upsample,

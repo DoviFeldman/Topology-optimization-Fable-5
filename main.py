@@ -190,6 +190,9 @@ async def create_job(
     load_face: str = Form("top"),
     load_dir: str = Form("-z"),
     load_extent: float = Form(0.25),
+    load_cases: int = Form(1),
+    shape_preserve: float = Form(0.0),
+    domain_expand: float = Form(0.0),
     rmin: float = Form(2.0),
     max_iter: int = Form(60),
 ) -> JSONResponse:
@@ -200,6 +203,9 @@ async def create_job(
         load_face=load_face,
         load_dir=load_dir,
         load_extent=load_extent,
+        load_cases=load_cases,
+        shape_preserve=shape_preserve,
+        domain_expand=domain_expand,
         rmin=rmin,
         max_iter=max_iter,
     )

@@ -117,7 +117,12 @@ class FEModel:
     occ : (nx, ny, nz) bool array — solid voxels (each becomes one element)
     fixed_vox : bool array, same shape — voxels whose nodes are fully clamped
     load_vox : bool array, same shape — voxels whose nodes carry the load
-    load_dir : (3,) float — force direction (total magnitude 1, distributed)
+    load_dir : (3,) or (ncases, 3) float — force direction(s). Multiple rows
+        define independent load cases solved against the same stiffness matrix;
+        compliance is their (weighted) sum. Multi-case designs must resist
+        every direction at once, which is what produces cross-braced webbing
+        instead of a single strut path.
+    case_weights : optional (ncases,) float — weight of each case's compliance
     nu : Poisson ratio
     """
 
@@ -127,6 +132,7 @@ class FEModel:
         fixed_vox: np.ndarray,
         load_vox: np.ndarray,
         load_dir: np.ndarray,
+        case_weights: np.ndarray | None = None,
         nu: float = 0.3,
     ) -> None:
         if not occ.any():
@@ -159,15 +165,21 @@ class FEModel:
         load_nodes = np.unique(load_dofs_all // 3)
         if len(load_nodes) == 0 or len(self.fixed_dofs) == 0:
             raise ValueError("empty load or support region")
-        self.f = np.zeros(self.ndof)
-        d = np.asarray(load_dir, dtype=float)
-        d = d / np.linalg.norm(d)
-        for axis in range(3):
-            if d[axis] != 0.0:
-                self.f[3 * load_nodes + axis] = d[axis] / len(load_nodes)
+        dirs = np.atleast_2d(np.asarray(load_dir, dtype=float))
+        self.ncases = len(dirs)
+        self.single_case = np.asarray(load_dir).ndim == 1
+        self.case_weights = (
+            np.ones(self.ncases) if case_weights is None else np.asarray(case_weights, float)
+        )
+        self.f = np.zeros((self.ncases, self.ndof))
+        for ci, d in enumerate(dirs):
+            d = d / np.linalg.norm(d)
+            for axis in range(3):
+                if d[axis] != 0.0:
+                    self.f[ci, 3 * load_nodes + axis] = d[axis] / len(load_nodes)
         self.free_mask = np.ones(self.ndof, dtype=bool)
         self.free_mask[self.fixed_dofs] = False
-        self.f[~self.free_mask] = 0.0
+        self.f[:, ~self.free_mask] = 0.0
         self.n_free = int(self.free_mask.sum())
 
         # ---- solver strategy
@@ -179,7 +191,7 @@ class FEModel:
         else:
             self.strategy = "matrix-free-cg"
 
-        self._u = np.zeros(self.ndof)  # warm start across solves
+        self._u = np.zeros((self.ncases, self.ndof))  # warm starts across solves
         self._assembly_cache: tuple | None = None
         self._amg = None
         self._solve_count = 0
@@ -206,19 +218,27 @@ class FEModel:
         return E_MIN + np.clip(x_phys, 0.0, 1.0) ** penal * (1.0 - E_MIN)
 
     def solve(self, scale: np.ndarray) -> np.ndarray:
-        """Solve K(scale) u = f. Returns the full displacement vector."""
+        """Solve K(scale) u = f for every load case.
+
+        Returns (ncases, ndof), or a flat (ndof,) vector when the model was
+        built with a single (3,) direction — the pre-multi-case API.
+        """
         self._solve_count += 1
         if self.strategy == "splu":
             u = self._solve_direct(scale)
         else:
             u = self._solve_cg(scale)
         self._u = u
-        return u
+        return u[0] if self.single_case else u
 
     def compliance(self, u: np.ndarray, scale: np.ndarray) -> tuple[float, np.ndarray]:
-        """Total compliance and per-element strain energy ce = u_e^T KE u_e."""
-        ue = u[self.edof]
-        ce = np.einsum("ij,ij->i", ue @ self.ke, ue)
+        """Weighted-total compliance and per-element strain energy over all cases."""
+        u2 = np.atleast_2d(u)
+        ce = np.zeros(self.nel)
+        for ci in range(u2.shape[0]):
+            ue = u2[ci][self.edof]
+            ce_i = np.einsum("ij,ij->i", ue @ self.ke, ue)
+            ce += self.case_weights[ci] * ce_i
         np.maximum(ce, 0.0, out=ce)  # clip tiny negative round-off
         return float(np.dot(scale, ce)), ce
 
@@ -246,9 +266,10 @@ class FEModel:
         return k
 
     def _solve_direct(self, scale: np.ndarray) -> np.ndarray:
-        k = self._assemble(scale)
-        u = np.zeros(self.ndof)
-        u[self.free_mask] = splu(k.tocsc()).solve(self.f[self.free_mask])
+        lu = splu(self._assemble(scale).tocsc())  # one factorization, all cases
+        u = np.zeros((self.ncases, self.ndof))
+        for ci in range(self.ncases):
+            u[ci, self.free_mask] = lu.solve(self.f[ci, self.free_mask])
         self.last_cg_iters = 0
         return u
 
@@ -290,17 +311,20 @@ class FEModel:
         return op
 
     def _solve_cg(self, scale: np.ndarray) -> np.ndarray:
+        u = np.zeros((self.ncases, self.ndof))
         if self.strategy == "matrix-free-cg":
             op = self._matvec_free(scale)
-            diag = self._jacobi_diag(scale)
-            inv_diag = 1.0 / diag
+            inv_diag = 1.0 / self._jacobi_diag(scale)
 
             def precond(r: np.ndarray) -> np.ndarray:
                 return r * inv_diag
 
-            u = self._pcg(op, self.f, self._u, precond)
+            for ci in range(self.ncases):
+                u[ci] = self._pcg(op, self.f[ci], self._u[ci], precond)
             return u
 
+        # assembly and preconditioner are shared by all load cases — extra
+        # cases only cost extra CG solves, not extra setup
         k = self._assemble(scale)
         if self.strategy == "amg-cg" and (
             self._amg is None or self._solve_count % self.amg_rebuild_every == 1
@@ -318,11 +342,12 @@ class FEModel:
             def precond_red(r: np.ndarray) -> np.ndarray:
                 return r * inv_diag_red
 
-        f_red = self.f[self.free_mask]
-        x0 = self._u[self.free_mask]
-        u_red = self._pcg(lambda v: k @ v, f_red, x0, precond_red)
-        u = np.zeros(self.ndof)
-        u[self.free_mask] = u_red
+        for ci in range(self.ncases):
+            u_red = self._pcg(
+                lambda v: k @ v, self.f[ci, self.free_mask],
+                self._u[ci, self.free_mask], precond_red,
+            )
+            u[ci, self.free_mask] = u_red
         return u
 
     def _pcg(self, op, b: np.ndarray, x0: np.ndarray, precond) -> np.ndarray:

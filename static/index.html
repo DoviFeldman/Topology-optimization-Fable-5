@@ -125,14 +125,46 @@
       <div class="chip" data-style="solid">🪨 Solid</div>
     </div>
     <div>
-      <label>Keep material <b id="volv">28%</b></label>
-      <input type="range" id="vol" min="10" max="80" step="1" value="28">
+      <label>Internal webbing <span title="How many force directions the part must survive. One direction needs only a single truss (a 'stick'); several directions at once force the classic cross-braced web. More = webbier but proportionally slower.">ⓘ</span></label>
+      <div id="webchips" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+        <div class="chip" data-cases="1">▬ none</div>
+        <div class="chip" data-cases="3">╳ crossed</div>
+        <div class="chip" data-cases="5">✳ woven</div>
+      </div>
     </div>
     <div>
-      <label>Resolution (detail) <b id="resv">96</b> <span title="Voxels along the longest axis. Higher = finer struts but much slower. 48-64 for drafts, 96+ for final quality.">ⓘ</span></label>
+      <label>Keep outer shape <b id="shapev">35%</b> <span title="Protects the original surface. 0% = pure skeleton (may reduce to a stick). 100% = full skin kept (no visible webbing). In between, the silhouette survives where it carries load and opens up organically where it doesn't — the sweet spot is 30-50%.">ⓘ</span></label>
+      <input type="range" id="shape" min="0" max="100" step="5" value="35">
+    </div>
+    <div>
+      <label>Keep material <b id="volv">30%</b></label>
+      <input type="range" id="vol" min="10" max="80" step="1" value="30">
+    </div>
+    <div>
+      <label>Extra build room <b id="expandv">0%</b> <span title="Lets the optimizer grow struts OUTSIDE the original shape by this much (as a fraction of the model size). Great for bridges and brackets that want external buttresses. Slower and changes the silhouette.">ⓘ</span></label>
+      <input type="range" id="expand" min="0" max="30" step="5" value="0">
+    </div>
+    <div>
+      <label>Resolution (detail) <b id="resv">96</b> <span title="Voxels along the longest axis. Higher = finer struts but much slower. 48-64 for drafts, 96+ for final quality. Struts can never be thinner than a voxel — webbing needs resolution.">ⓘ</span></label>
       <input type="range" id="res" min="24" max="160" step="8" value="96">
     </div>
   </div>
+
+  <details>
+    <summary style="cursor:pointer;font-size:12px;color:var(--muted);">🧠 How this works, in one minute</summary>
+    <div class="note" style="margin-top:8px;">
+      The optimizer keeps only the material that carries force from the
+      <b style="color:#f7a44f">orange spot</b> to the <b style="color:#4f8ef7">blue anchors</b>,
+      then smooths the survivor into a printable shell.<br><br>
+      <b>Blobs?</b> Force too spread out (raise concentration via a smaller force
+      area) or too much material kept.<br>
+      <b>Just a stick?</b> One force direction only needs one strut — turn up
+      <i>Internal webbing</i> and/or <i>Keep outer shape</i>.<br>
+      <b>Whole shape vanished?</b> Raise <i>Keep outer shape</i>: it puts a floor
+      under the surface skin so your silhouette survives.<br>
+      <b>Webs too chunky?</b> More <i>Resolution</i>, less <i>Keep material</i>.
+    </div>
+  </details>
 
   <button id="run" disabled>Optimize</button>
 
@@ -324,11 +356,22 @@ const PRESETS = {
   custom:  { hint: 'Blue = anchored. Orange circle = where the force lands, arrow = its direction. Smaller force area ⇒ more dramatic webs.' },
 };
 const STYLES = {
-  skeletal: { vol: 18, rmin: 1.4, ext: 15 },
-  balanced: { vol: 28, rmin: 1.8, ext: 25 },
-  solid:    { vol: 45, rmin: 2.4, ext: 60 },
+  skeletal: { vol: 18, rmin: 1.4, ext: 15, cases: 5, shape: 15 },
+  balanced: { vol: 30, rmin: 1.8, ext: 25, cases: 3, shape: 35 },
+  solid:    { vol: 45, rmin: 2.4, ext: 60, cases: 1, shape: 60 },
 };
-let preset = 'bridge', rmin = 1.8;
+let preset = 'bridge', rmin = 1.8, loadCases = 3;
+const shape = document.getElementById('shape'), expand = document.getElementById('expand');
+shape.addEventListener('input', () => document.getElementById('shapev').textContent = shape.value + '%');
+expand.addEventListener('input', () => document.getElementById('expandv').textContent = expand.value + '%');
+
+function setWebChips(cases) {
+  loadCases = cases;
+  document.querySelectorAll('#webchips .chip').forEach(c =>
+    c.classList.toggle('active', +c.dataset.cases === cases));
+}
+document.querySelectorAll('#webchips .chip').forEach(ch =>
+  ch.addEventListener('click', () => setWebChips(+ch.dataset.cases)));
 
 function currentBC() {
   const p = PRESETS[preset];
@@ -354,11 +397,15 @@ document.querySelectorAll('#styles .chip').forEach(ch => ch.addEventListener('cl
   document.getElementById('volv').textContent = s.vol + '%';
   ext.value = s.ext;
   document.getElementById('extv').textContent = s.ext + '%';
+  shape.value = s.shape;
+  document.getElementById('shapev').textContent = s.shape + '%';
   rmin = s.rmin;
+  setWebChips(s.cases);
   updateBCOverlay();
 }));
 document.querySelector('#presets .chip[data-preset="bridge"]').classList.add('active');
 document.querySelector('#styles .chip[data-style="balanced"]').classList.add('active');
+setWebChips(3);
 document.getElementById('scenarioHint').textContent = PRESETS.bridge.hint;
 
 function setStatus(msg, isErr = false) {
@@ -399,6 +446,9 @@ runBtn.addEventListener('click', async () => {
   fd.append('load_face', bc.load);
   fd.append('load_dir', bc.dir);
   fd.append('load_extent', bc.extent.toString());
+  fd.append('load_cases', loadCases.toString());
+  fd.append('shape_preserve', (shape.value / 100).toString());
+  fd.append('domain_expand', (expand.value / 100).toString());
   fd.append('rmin', rmin.toString());
   runBtn.disabled = true;
   dlBtn.style.display = 'none';
