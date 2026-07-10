@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Webbing Gallery — Topology Optimizer</title>
+<style>
+  :root {
+    --bg: #101318; --panel: #181d25; --panel2: #1f2632; --text: #e8ecf1;
+    --muted: #8b96a5; --accent: #4f8ef7; --accent2: #34d399; --border: #2a3342;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden; }
+  #list { width: 360px; min-width: 360px; background: var(--panel); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  h1 { font-size: 16px; font-weight: 650; }
+  h1 span { color: var(--accent); }
+  .sub { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .sub a { color: var(--accent); }
+  .card { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; cursor: pointer; transition: border-color .15s; }
+  .card:hover { border-color: var(--accent); }
+  .card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card h3 { font-size: 13px; margin-bottom: 4px; }
+  .card .blurb { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin-bottom: 8px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .stat { font-size: 10.5px; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px; color: var(--muted); }
+  .stat b { color: var(--accent2); font-weight: 600; }
+  .dl { display: inline-block; font-size: 11.5px; font-weight: 600; color: #06281c; background: var(--accent2); border-radius: 6px; padding: 5px 10px; text-decoration: none; }
+  .err { color: #f87171; font-size: 11.5px; }
+  #viewer { flex: 1; position: relative; }
+  #canvas3d { position: absolute; inset: 0; }
+  #title { position: absolute; top: 14px; left: 14px; z-index: 5; font-size: 13px; background: rgba(24,29,37,.85); border: 1px solid var(--border); border-radius: 6px; padding: 7px 12px; backdrop-filter: blur(4px); }
+  #hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--muted); background: rgba(24,29,37,.7); padding: 5px 12px; border-radius: 6px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="list">
+  <div>
+    <h1>Webbing <span>Gallery</span></h1>
+    <div class="sub">
+      One tall cylinder pedestal (30×65&nbsp;mm, anchored at the bottom, weight
+      pressing on the top plate), optimized 10 ways. Click a card to view,
+      orbit with the mouse, download what you like.
+      <a href="/">← back to the optimizer</a>
+    </div>
+  </div>
+  <div id="cards" class="sub">loading manifest…</div>
+</div>
+<div id="viewer">
+  <div id="title">pick a model</div>
+  <div id="canvas3d"></div>
+  <div id="hint">drag to rotate · scroll to zoom · right-drag to pan</div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+const container = document.getElementById('canvas3d');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101318);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+container.appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x1c2030, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(1, 2, 1.5); scene.add(key);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.7); rim.position.set(-1.5, -1, -1); scene.add(rim);
+const mat = new THREE.MeshStandardMaterial({ color: 0x4f8ef7, metalness: 0.3, roughness: 0.35 });
+
+let mesh = null;
+function resize() {
+  const w = container.clientWidth, h = container.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(container); resize();
+(function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); })();
+
+async function show(file, name) {
+  document.getElementById('title').textContent = name + ' — loading…';
+  const buf = await (await fetch('/gallery/' + file)).arrayBuffer();
+  const geo = new STLLoader().parse(buf);
+  geo.computeVertexNormals();
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  scene.add(mesh);
+  const box = new THREE.Box3().setFromObject(mesh);
+  const size = box.getSize(new THREE.Vector3()).length();
+  const center = box.getCenter(new THREE.Vector3());
+  controls.target.copy(center);
+  camera.position.copy(center).add(new THREE.Vector3(0.8, 0.4, 1).normalize().multiplyScalar(size * 1.3));
+  camera.near = size / 500; camera.far = size * 20; camera.updateProjectionMatrix();
+  document.getElementById('title').textContent = name;
+}
+
+const fmt = (s) => Object.entries(s).map(([k, v]) => `${k}=${v}`).join(' · ');
+
+async function load() {
+  const holder = document.getElementById('cards');
+  let manifest;
+  try {
+    manifest = await (await fetch('/gallery/manifest.json', { cache: 'no-store' })).json();
+  } catch {
+    holder.textContent = 'No gallery yet — run: python make_gallery.py';
+    return;
+  }
+  holder.textContent = '';
+  holder.classList.remove('sub');
+  manifest.models.forEach((m, i) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const mt = m.metrics || {};
+    card.innerHTML = `
+      <h3>${m.name}</h3>
+      <div class="blurb">${m.blurb}</div>
+      ${m.error ? `<div class="err">${m.error}</div>` : `
+      <div class="stats">
+        <span class="stat">holes <b>${mt.genus}</b></span>
+        <span class="stat">inner material <b>${Math.round((mt.inner_fraction || 0) * 100)}%</b></span>
+        <span class="stat">volume <b>${mt.volume_pct}%</b></span>
+        <span class="stat">${m.seconds}s</span>
+      </div>
+      <a class="dl" download href="/gallery/${m.file}">⬇ download STL</a>`}
+    `;
+    if (!m.error) {
+      card.addEventListener('click', e => {
+        if (e.target.classList.contains('dl')) return;
+        document.querySelectorAll('.card').forEach(c => c.classList.toggle('active', c === card));
+        show(m.file, m.name);
+      });
+      if (i === 0) { card.classList.add('active'); show(m.file, m.name); }
+    }
+    holder.appendChild(card);
+  });
+}
+load();
+</script>
+</body>
+</html>
