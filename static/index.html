@@ -155,6 +155,11 @@
       <span style="color:var(--text);">Loaded face stays a solid plate</span>
       <span title="Keeps the ENTIRE loaded face (e.g. the whole top of a cylinder) as a flat solid plate for things to mount on — the force still pushes only on the orange patch. Painted force regions replace this.">ⓘ</span>
     </label>
+    <label style="display:flex; gap:8px; align-items:center; cursor:pointer; margin-bottom:0;">
+      <input type="checkbox" id="inside" style="accent-color: var(--accent);">
+      <span style="color:var(--text);">Webbing inside only (carve the skin)</span>
+      <span title="Physics loves a hollow tube, so structure normally migrates to the OUTER surface. This forbids material on the outer skin (contact pads excepted), forcing the webbing to form INSIDE where you can see it through the openings. Overrides 'Keep outer shape'.">ⓘ</span>
+    </label>
     <div>
       <label>Extra build room <b id="expandv">0%</b> <span title="Lets the optimizer grow struts OUTSIDE the original shape by this much (as a fraction of the model size). Great for bridges and brackets that want external buttresses. Slower and changes the silhouette.">ⓘ</span></label>
       <input type="range" id="expand" min="0" max="30" step="5" value="0">
@@ -622,6 +627,7 @@ runBtn.addEventListener('click', async () => {
   fd.append('solid_load_face', document.getElementById('solidload').checked.toString());
   fd.append('load_cases', loadCases.toString());
   fd.append('shape_preserve', (shape.value / 100).toString());
+  fd.append('webbing_inside', document.getElementById('inside').checked.toString());
   fd.append('domain_expand', (expand.value / 100).toString());
   fd.append('rmin', rmin.toString());
   fd.append('min_feature_mm', minf.value);

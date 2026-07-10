@@ -58,6 +58,9 @@ class Params:
     #   more cases = the part must resist wobble = cross-braced internal webbing
     shape_preserve: float = 0.0  # 0..1 density floor on the surface shell:
     #   keeps the input silhouette where it helps, opens up where it doesn't
+    webbing_inside: bool = False  # forbid material on the outer skin (except
+    #   contact pads): physics prefers a hollow tube, so without this the
+    #   structure migrates outward; with it, webbing must form INSIDE
     domain_expand: float = 0.0  # 0..0.3: grow the buildable space outward by
     #   this fraction of the resolution, letting struts form outside the input
     paint_fix: str = ""  # JSON [[x,y,z],...] painted anchor points (mesh coords,
@@ -228,9 +231,18 @@ def run_pipeline(
     # silhouette survives where it carries load and erodes where it doesn't
     # (below ~0.5 the shell falls under the meshing iso-level and opens up).
     floor_vec = None
-    if params.shape_preserve > 0:
-        shell = original_occ & ~ndimage.binary_erosion(original_occ, iterations=2)
+    shell = original_occ & ~ndimage.binary_erosion(original_occ, iterations=2)
+    if params.shape_preserve > 0 and not params.webbing_inside:
         floor_vec = np.where(shell, float(params.shape_preserve), 0.0)[grid.occ]
+
+    # webbing_inside is the opposite of shape preservation: a density CEILING
+    # below the meshing iso-level on that same shell, so the outer skin (minus
+    # the contact pads, which stay passive-solid) can never materialize —
+    # structure is forced to form as internal webbing instead of the hollow
+    # tube that pure physics prefers.
+    ceiling_vec = None
+    if params.webbing_inside:
+        ceiling_vec = np.where(shell, 0.25, 1.0)[grid.occ]
 
     def painted_voxels(points_json: str, what: str) -> np.ndarray:
         """Occupied voxels within the brush radius of any painted point."""
@@ -318,6 +330,7 @@ def run_pipeline(
         max_iter=params.max_iter,
         case_weights=np.array(weights),
         min_density=floor_vec,
+        max_density=ceiling_vec,
         passive=passive_grid,
         progress=simp_progress,
     )

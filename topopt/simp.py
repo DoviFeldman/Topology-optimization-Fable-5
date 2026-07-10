@@ -85,6 +85,7 @@ def simp_optimize(
     move: float = 0.2,
     case_weights: np.ndarray | None = None,
     min_density: np.ndarray | None = None,
+    max_density: np.ndarray | None = None,
     passive: np.ndarray | None = None,
     progress: ProgressFn | None = None,
 ) -> SimpResult:
@@ -109,9 +110,15 @@ def simp_optimize(
 
     nel = fem.nel
     floor = np.zeros(nel) if min_density is None else np.clip(min_density, 0.0, 1.0)
-    x = np.maximum(np.full(nel, volfrac), floor)
+    # a ceiling below the 0.5 meshing iso-level *forbids* material in a region
+    # (e.g. the outer skin), forcing structure to form elsewhere. Passive pads
+    # and the floor always win over the ceiling.
+    ceiling = np.ones(nel) if max_density is None else np.clip(max_density, 0.0, 1.0)
+    ceiling[passive] = 1.0
+    np.maximum(ceiling, floor, out=ceiling)  # never let the bounds cross
+    x = np.clip(np.full(nel, volfrac), floor, ceiling)
     x[passive] = 1.0
-    x_phys = np.maximum(filt.forward(x), floor)
+    x_phys = np.clip(filt.forward(x), floor, ceiling)
     x_phys[passive] = 1.0
 
     dv = filt.backward(np.ones(nel))  # constant across iterations
@@ -121,7 +128,10 @@ def simp_optimize(
     # can swallow the whole budget and the free interior collapses into a
     # structureless gray that meshes as a shrunken blob.
     base = np.where(passive, 1.0, floor)
-    vol_target_eff = min(0.9, float(np.mean(base + (1.0 - base) * volfrac)))
+    capacity = float(np.mean(np.where(passive, 1.0, ceiling)))  # max achievable volume
+    vol_target_eff = min(
+        0.9, 0.95 * capacity, float(np.mean(base + (1.0 - base) * volfrac))
+    )
 
     result = SimpResult(density_grid=np.zeros(occ.shape, dtype=np.float32))
     vol_target = vol_target_eff  # adjusted by feedback so filtered volume hits it
@@ -140,8 +150,8 @@ def simp_optimize(
         dc = filt.backward(dc)
         np.minimum(dc, -1e-30, out=dc)
 
-        x_new = _oc_update(x, dc, dv, vol_target, move, passive, floor)
-        x_phys = np.maximum(filt.forward(x_new), floor)
+        x_new = _oc_update(x, dc, dv, vol_target, move, passive, floor, ceiling)
+        x_phys = np.clip(filt.forward(x_new), floor, ceiling)
         x_phys[passive] = 1.0
         np.clip(x_phys, 0.0, 1.0, out=x_phys)
 
@@ -180,11 +190,12 @@ def _oc_update(
     move: float,
     passive: np.ndarray,
     floor: np.ndarray,
+    ceiling: np.ndarray,
 ) -> np.ndarray:
     """Optimality Criteria update with bisection on the Lagrange multiplier."""
     l1, l2 = 0.0, 1e9
     lower = np.maximum(x - move, floor)
-    upper = np.minimum(x + move, 1.0)
+    upper = np.minimum(x + move, ceiling)
     x_new = x
     while (l2 - l1) / max(l2 + l1, 1e-30) > 1e-4:
         lmid = 0.5 * (l1 + l2)

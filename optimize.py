@@ -68,6 +68,11 @@ def main(argv: list[str] | None = None) -> int:
         help="force directions (tilts around --dir); more = webbier, slower",
     )
     parser.add_argument(
+        "--inside", action="store_true", dest="webbing_inside",
+        help="forbid material on the outer skin (except contact pads) so the "
+             "webbing forms INSIDE instead of a hollow tube",
+    )
+    parser.add_argument(
         "--shape-preserve", type=float, default=0.0,
         help="0..1 density floor on the surface shell — keeps the input's "
              "silhouette where it carries load (0.5+ keeps it everywhere)",
@@ -106,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         solid_load_face=not args.hollow_load_face,
         load_cases=args.load_cases,
         shape_preserve=args.shape_preserve,
+        webbing_inside=args.webbing_inside,
         domain_expand=args.domain_expand,
         rmin=args.rmin,
         min_feature_mm=args.min_feature_mm,
