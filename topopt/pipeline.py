@@ -57,6 +57,10 @@ class Params:
     #   keeps the input silhouette where it helps, opens up where it doesn't
     domain_expand: float = 0.0  # 0..0.3: grow the buildable space outward by
     #   this fraction of the resolution, letting struts form outside the input
+    paint_fix: str = ""  # JSON [[x,y,z],...] painted anchor points (mesh coords,
+    #   after rotation); when given, replaces fix_face entirely
+    paint_load: str = ""  # JSON painted force points; replaces load_face/extent
+    paint_radius: float = 0.0  # brush radius in mesh units around painted points
     rmin: float = 2.0  # density-filter radius, in voxels (1.5..2.5)
     min_feature_mm: float = 1.0  # printability: no strut thinner than this (mm);
     #   also sets the thickness of the solid pads kept at anchors and load
@@ -94,6 +98,16 @@ class Params:
             raise ValueError("rmin must be within 1.0..4.0")
         if not 0.0 <= self.min_feature_mm <= 5.0:
             raise ValueError("min_feature_mm must be within 0..5")
+        for name, blob in (("paint_fix", self.paint_fix), ("paint_load", self.paint_load)):
+            if blob:
+                try:
+                    pts = np.asarray(json.loads(blob), dtype=float)
+                except (ValueError, TypeError) as exc:
+                    raise ValueError(f"{name} is not valid JSON points: {exc}")
+                if pts.ndim != 2 or pts.shape[1] != 3 or len(pts) > 100_000:
+                    raise ValueError(f"{name} must be an [[x,y,z],...] list (max 100k points)")
+        if (self.paint_fix or self.paint_load) and not self.paint_radius > 0:
+            raise ValueError("paint_radius must be positive when paint points are given")
         if self.rotation:
             try:
                 r = np.array(json.loads(self.rotation), dtype=float)
@@ -215,13 +229,34 @@ def run_pipeline(
         shell = original_occ & ~ndimage.binary_erosion(original_occ, iterations=2)
         floor_vec = np.where(shell, float(params.shape_preserve), 0.0)[grid.occ]
 
-    fixed_vox = np.zeros_like(grid.occ)
-    for f in params.fix_faces:
-        fixed_vox |= face_voxels(grid.occ, f)
-    load_vox = face_voxels(grid.occ, params.load_face, params.load_extent)
+    def painted_voxels(points_json: str, what: str) -> np.ndarray:
+        """Occupied voxels within the brush radius of any painted point."""
+        pts = np.asarray(json.loads(points_json), dtype=float).reshape(-1, 3)
+        ijk = np.floor((pts - grid.origin) / grid.pitch).astype(int)
+        ijk = np.clip(ijk, 0, np.array(grid.occ.shape) - 1)
+        mask = np.zeros_like(grid.occ)
+        mask[ijk[:, 0], ijk[:, 1], ijk[:, 2]] = True
+        r_it = max(1, int(round(params.paint_radius / grid.pitch)))
+        mask = ndimage.binary_dilation(mask, iterations=r_it) & grid.occ
+        if not mask.any():
+            raise ValueError(f"the painted {what} region does not touch the part")
+        return mask
+
+    if params.paint_fix:
+        fixed_vox = painted_voxels(params.paint_fix, "anchor")
+    else:
+        fixed_vox = np.zeros_like(grid.occ)
+        for f in params.fix_faces:
+            fixed_vox |= face_voxels(grid.occ, f)
+    if params.paint_load:
+        load_vox = painted_voxels(params.paint_load, "force")
+    else:
+        load_vox = face_voxels(grid.occ, params.load_face, params.load_extent)
     overlap = fixed_vox & load_vox
     if overlap.any():
         load_vox &= ~overlap
+        if not load_vox.any():
+            raise ValueError("force region is entirely inside the anchored region")
 
     # printability: no strut thinner than min_feature_mm. The density filter's
     # radius sets the minimum member size (~2 * rmin voxels), so give it a

@@ -46,6 +46,11 @@
   #rotbar { position: absolute; top: 52px; left: 14px; z-index: 5; display: flex; gap: 4px; align-items: center; background: rgba(24,29,37,.85); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; backdrop-filter: blur(4px); }
   #rotbar span { font-size: 11px; color: var(--muted); margin-right: 2px; }
   #rotbar button { padding: 3px 7px; font-size: 11px; font-weight: 600; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+  #paintbar { position: absolute; top: 90px; left: 14px; z-index: 5; display: flex; gap: 4px; align-items: center; background: rgba(24,29,37,.85); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; backdrop-filter: blur(4px); }
+  #paintbar span { font-size: 11px; color: var(--muted); margin-right: 2px; }
+  #paintbar button { padding: 3px 7px; font-size: 11px; font-weight: 600; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+  #paintbar button.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+  #paintbar input[type=range] { width: 64px; }
   #bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
   #barfill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .4s; }
   #phase { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
@@ -173,7 +178,10 @@
       <b>Contact surfaces are sacred:</b> the blue anchor faces and the orange
       force spot always keep a flat, solid pad (at least <i>min strut</i> thick)
       — the part still sits flat and bolts on exactly like the original; only
-      the material <i>between</i> the pads gets carved.
+      the material <i>between</i> the pads gets carved.<br>
+      <b>Painting beats presets:</b> use the paint tools (top-left of the viewer)
+      to brush exactly where the part is held (blue) and where the force lands
+      (orange) — painted spots are never carved and override the scenario faces.
     </div>
   </details>
 
@@ -199,6 +207,14 @@
     <button data-rot="x,1">X+</button><button data-rot="x,-1">X−</button>
     <button data-rot="y,1">Y+</button><button data-rot="y,-1">Y−</button>
     <button data-rot="z,1">Z+</button><button data-rot="z,-1">Z−</button>
+  </div>
+  <div id="paintbar" title="Paint directly on the model: blue = anchored (holds the world), orange = where the force pushes. Painted spots keep solid material and override the scenario's face choices. Orbiting is paused while a paint tool is active — click the tool again to orbit.">
+    <span>paint</span>
+    <button id="pFix">🟦 anchor</button>
+    <button id="pLoad">🟧 force</button>
+    <button id="pErase">⌫</button>
+    <button id="pClear">✕</button>
+    <input type="range" id="brush" min="2" max="15" step="1" value="6" title="Brush size">
   </div>
   <div id="canvas3d"></div>
   <div id="bclegend">
@@ -261,6 +277,7 @@ function showMesh(which) {
   if (resultMesh) resultMesh.visible = which === 'result';
   document.getElementById('tabInput').classList.toggle('active', which === 'input');
   document.getElementById('tabResult').classList.toggle('active', which === 'result');
+  for (const k of ['fix', 'load']) if (paintClouds[k]) paintClouds[k].visible = which === 'input';
   updateBCOverlay();
 }
 
@@ -286,15 +303,18 @@ function facePatch(bb, face, color, frac, circle) {
   return patch;
 }
 
+function arrowToTip(tip, dirName, len, color) {
+  const d = new THREE.Vector3(...DIR_VEC[dirName]);
+  const origin = tip.clone().sub(d.clone().multiplyScalar(len)); // tip lands on the loaded spot
+  return new THREE.ArrowHelper(d, origin, len, color, len * 0.3, len * 0.15);
+}
+
 function loadArrow(bb, face, dirName, color) {
   const [axis, sign] = FACE_INFO[face];
   const size = bb.getSize(new THREE.Vector3()), center = bb.getCenter(new THREE.Vector3());
   const dims = [size.x, size.y, size.z];
   const tip = center.clone().setComponent(axis, center.getComponent(axis) + sign * dims[axis] / 2);
-  const d = new THREE.Vector3(...DIR_VEC[dirName]);
-  const len = Math.max(dims[0], dims[1], dims[2]) * 0.35;
-  const origin = tip.clone().sub(d.clone().multiplyScalar(len)); // tip lands on the loaded spot
-  return new THREE.ArrowHelper(d, origin, len, color, len * 0.3, len * 0.15);
+  return arrowToTip(tip, dirName, Math.max(dims[0], dims[1], dims[2]) * 0.35, color);
 }
 
 function updateBCOverlay() {
@@ -307,9 +327,16 @@ function updateBCOverlay() {
   const bc = currentBC();
   bcGroup = new THREE.Group();
   bcGroup.rotation.x = -Math.PI / 2;
-  for (const f of bc.fix) bcGroup.add(facePatch(bb, f, 0x4f8ef7, 1.0, false));
-  bcGroup.add(facePatch(bb, bc.load, 0xf7a44f, bc.extent, true));
-  bcGroup.add(loadArrow(bb, bc.load, bc.dir, 0xf7a44f));
+  const size = bb.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  // painted regions replace the face-based visuals (the point clouds are the visual)
+  if (!paintPts.fix.length) for (const f of bc.fix) bcGroup.add(facePatch(bb, f, 0x4f8ef7, 1.0, false));
+  if (!paintPts.load.length) {
+    bcGroup.add(facePatch(bb, bc.load, 0xf7a44f, bc.extent, true));
+    bcGroup.add(loadArrow(bb, bc.load, bc.dir, 0xf7a44f));
+  } else {
+    bcGroup.add(arrowToTip(paintCentroid('load'), bc.dir, maxDim * 0.35, 0xf7a44f));
+  }
   scene.add(bcGroup);
   legend.style.display = 'block';
 }
@@ -348,6 +375,8 @@ function acceptFile(f) {
   currentFile = f;
   rotAccum.identity();
   rotated = false;
+  paintPts.fix.length = paintPts.load.length = 0;
+  refreshPaintClouds();
   document.getElementById('fileinfo').textContent =
     `${f.name} (${(f.size / 1048576).toFixed(1)} MB)`;
   runBtn.disabled = false;
@@ -402,6 +431,8 @@ function rotateModel(axis, sign) {
   g.computeBoundingBox();
   rotAccum.premultiply(m);
   rotated = true;
+  for (const k of ['fix', 'load']) paintPts[k].forEach(p => p.applyMatrix4(m));  // paint stays glued on
+  refreshPaintClouds();
   frameObject(inputMesh);
   updateBCOverlay();
 }
@@ -412,6 +443,88 @@ document.querySelectorAll('#rotbar button').forEach(b => b.addEventListener('cli
 function rotationRowMajor() {
   const e = rotAccum.elements;  // THREE stores column-major
   return [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
+}
+
+// ---------- paint boundary conditions directly on the model ----------
+let paintMode = null;  // null | 'fix' | 'load' | 'erase'
+let painting = false;
+const paintPts = { fix: [], load: [] };  // Vector3s in the model's own (STL) space
+const paintClouds = { fix: null, load: null };
+const raycaster = new THREE.Raycaster();
+const brushEl = document.getElementById('brush');
+
+function brushRadius() {
+  if (!inputMesh) return 1;
+  const bb = inputMesh.geometry.boundingBox;
+  return bb.getSize(new THREE.Vector3()).length() * brushEl.value / 200;
+}
+
+function setPaintMode(mode) {
+  paintMode = paintMode === mode ? null : mode;
+  controls.enabled = !paintMode;
+  for (const [id, m] of [['pFix', 'fix'], ['pLoad', 'load'], ['pErase', 'erase']])
+    document.getElementById(id).classList.toggle('active', paintMode === m);
+  renderer.domElement.style.cursor = paintMode ? 'crosshair' : '';
+}
+document.getElementById('pFix').addEventListener('click', () => setPaintMode('fix'));
+document.getElementById('pLoad').addEventListener('click', () => setPaintMode('load'));
+document.getElementById('pErase').addEventListener('click', () => setPaintMode('erase'));
+document.getElementById('pClear').addEventListener('click', () => {
+  paintPts.fix.length = paintPts.load.length = 0;
+  refreshPaintClouds(); updateBCOverlay();
+});
+
+function pickPoint(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(
+    ((e.clientX - r.left) / r.width) * 2 - 1,
+    -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const hit = raycaster.intersectObject(inputMesh, false)[0];
+  return hit ? inputMesh.worldToLocal(hit.point.clone()) : null;
+}
+
+function paintAt(e) {
+  const p = pickPoint(e);
+  if (!p) return;
+  const rad = brushRadius();
+  if (paintMode === 'erase') {
+    for (const k of ['fix', 'load']) paintPts[k] = paintPts[k].filter(q => q.distanceTo(p) > rad);
+  } else {
+    const other = paintMode === 'fix' ? 'load' : 'fix';
+    paintPts[other] = paintPts[other].filter(q => q.distanceTo(p) > rad * 0.9);
+    if (!paintPts[paintMode].some(q => q.distanceTo(p) < rad * 0.35)) paintPts[paintMode].push(p);
+  }
+  refreshPaintClouds();
+}
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (paintMode && inputMesh && activeView === 'input' && e.button === 0) { painting = true; paintAt(e); }
+});
+window.addEventListener('pointermove', e => { if (painting) paintAt(e); });
+window.addEventListener('pointerup', () => {
+  if (painting) { painting = false; updateBCOverlay(); }
+});
+
+function refreshPaintClouds() {
+  for (const [k, color] of [['fix', 0x4f8ef7], ['load', 0xf7a44f]]) {
+    if (paintClouds[k]) { scene.remove(paintClouds[k]); paintClouds[k].geometry.dispose(); paintClouds[k] = null; }
+    if (!paintPts[k].length || !inputMesh) continue;
+    const g = new THREE.BufferGeometry().setFromPoints(paintPts[k]);
+    const cloud = new THREE.Points(g, new THREE.PointsMaterial({
+      color, size: brushRadius() * 1.7, sizeAttenuation: true,
+      transparent: true, opacity: 0.85, depthWrite: false,
+    }));
+    cloud.rotation.x = -Math.PI / 2;  // same frame as the input mesh
+    cloud.visible = activeView === 'input';
+    scene.add(cloud);
+    paintClouds[k] = cloud;
+  }
+}
+
+function paintCentroid(k) {
+  const c = new THREE.Vector3();
+  paintPts[k].forEach(p => c.add(p));
+  return c.divideScalar(paintPts[k].length);
 }
 
 function setWebChips(cases) {
@@ -501,6 +614,9 @@ runBtn.addEventListener('click', async () => {
   fd.append('rmin', rmin.toString());
   fd.append('min_feature_mm', minf.value);
   if (rotated) fd.append('rotation', JSON.stringify(rotationRowMajor()));
+  if (paintPts.fix.length) fd.append('paint_fix', JSON.stringify(paintPts.fix.map(p => [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)])));
+  if (paintPts.load.length) fd.append('paint_load', JSON.stringify(paintPts.load.map(p => [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)])));
+  if (paintPts.fix.length || paintPts.load.length) fd.append('paint_radius', brushRadius().toString());
   runBtn.disabled = true;
   dlBtn.style.display = 'none';
   document.getElementById('tabResult').classList.add('hidden');
