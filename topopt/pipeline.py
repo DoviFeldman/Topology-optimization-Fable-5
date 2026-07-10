@@ -51,6 +51,9 @@ class Params:
     load_face: str = "top"  # face whose voxels carry the load
     load_dir: str = "-z"  # force direction
     load_extent: float = 0.25  # fraction of the loaded face carrying force (1 = whole face)
+    solid_load_face: bool = True  # keep the ENTIRE loaded face as a solid plate
+    #   (the force still acts on the load_extent patch) — the mating surface
+    #   survives even when the force is concentrated
     load_cases: int = 1  # 1, 3 or 5 force directions (tilted around load_dir);
     #   more cases = the part must resist wobble = cross-braced internal webbing
     shape_preserve: float = 0.0  # 0..1 density floor on the surface shell:
@@ -263,14 +266,20 @@ def run_pipeline(
     # floor in voxel units derived from the physical requirement.
     rmin_eff = max(params.rmin, 0.5 * params.min_feature_mm / grid.pitch)
 
-    # contact pads: the anchored faces and the loaded patch stay fully solid
+    # contact pads: the anchored faces and the loaded surface stay fully solid
     # for at least min_feature_mm of depth, so the part still sits flat where
-    # it used to and the force has a solid boss to connect to — the optimizer
-    # may only carve *between* the pads, never the pads themselves.
+    # it used to and the force has a solid plate to connect to — the optimizer
+    # may only carve *between* the pads, never the pads themselves. With
+    # solid_load_face the pad covers the whole loaded face (not just the force
+    # patch); painted loads already are the user's explicit pad choice.
+    if params.paint_load or not params.solid_load_face:
+        load_pad = load_vox
+    else:
+        load_pad = face_voxels(grid.occ, params.load_face, 1.0)
     pad_it = max(2, int(np.ceil(params.min_feature_mm / grid.pitch)))
     passive_grid = (
         ndimage.binary_dilation(fixed_vox, iterations=pad_it)
-        | ndimage.binary_dilation(load_vox, iterations=pad_it)
+        | ndimage.binary_dilation(load_pad, iterations=pad_it)
     ) & grid.occ
 
     # load cases: the main direction plus tilted companions. A design that

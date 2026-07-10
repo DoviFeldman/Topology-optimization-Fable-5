@@ -145,9 +145,14 @@
       <input type="range" id="shape" min="0" max="100" step="5" value="35">
     </div>
     <div>
-      <label>Keep material <b id="volv">30%</b></label>
+      <label>Keep material <b id="volv">30%</b> <span title="How much of the CARVABLE interior to keep. Solid pads and preserved skin are extra, on top of this.">ⓘ</span></label>
       <input type="range" id="vol" min="10" max="80" step="1" value="30">
     </div>
+    <label style="display:flex; gap:8px; align-items:center; cursor:pointer; margin-bottom:0;">
+      <input type="checkbox" id="solidload" checked style="accent-color: var(--accent);">
+      <span style="color:var(--text);">Loaded face stays a solid plate</span>
+      <span title="Keeps the ENTIRE loaded face (e.g. the whole top of a cylinder) as a flat solid plate for things to mount on — the force still pushes only on the orange patch. Painted force regions replace this.">ⓘ</span>
+    </label>
     <div>
       <label>Extra build room <b id="expandv">0%</b> <span title="Lets the optimizer grow struts OUTSIDE the original shape by this much (as a fraction of the model size). Great for bridges and brackets that want external buttresses. Slower and changes the silhouette.">ⓘ</span></label>
       <input type="range" id="expand" min="0" max="30" step="5" value="0">
@@ -608,6 +613,7 @@ runBtn.addEventListener('click', async () => {
   fd.append('load_face', bc.load);
   fd.append('load_dir', bc.dir);
   fd.append('load_extent', bc.extent.toString());
+  fd.append('solid_load_face', document.getElementById('solidload').checked.toString());
   fd.append('load_cases', loadCases.toString());
   fd.append('shape_preserve', (shape.value / 100).toString());
   fd.append('domain_expand', (expand.value / 100).toString());
