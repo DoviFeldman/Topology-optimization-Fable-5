@@ -133,7 +133,10 @@ def _worker() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    JOBS_DIR.mkdir(exist_ok=True)
+    # single-user tool: job history dies with the server anyway (in-memory
+    # registry), so clear stale result files too instead of filling the disk
+    shutil.rmtree(JOBS_DIR, ignore_errors=True)
+    JOBS_DIR.mkdir()
     shutil.rmtree(UPLOADS_DIR, ignore_errors=True)
     UPLOADS_DIR.mkdir()
     thread = threading.Thread(target=_worker, name="topopt-worker", daemon=True)
