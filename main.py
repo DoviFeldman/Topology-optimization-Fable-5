@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -27,13 +27,23 @@ from topopt.pipeline import DIRECTIONS, FACES, Params, run_pipeline
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # generous cap for 1-2M triangle STLs
 JOBS_DIR = Path(__file__).parent / "jobs"
+# Reverse proxies in front of the app (e.g. GitHub Codespaces port forwarding)
+# reject request bodies over ~16 MB, so the frontend splits big files into
+# chunks that are reassembled here. Stale sessions are never reaped: this is
+# a single-user tool and uploads/ is cleared on restart.
+UPLOADS_DIR = Path(__file__).parent / "uploads"
+
+
+class JobCancelled(Exception):
+    """Raised inside the progress callback to abort a running optimization."""
 
 
 @dataclass
 class Job:
     id: str
-    status: str = "queued"  # queued | running | done | error
+    status: str = "queued"  # queued | running | done | error | canceled
     phase: str = "queued"
+    cancel_requested: bool = False
     iteration: int = 0
     total_iterations: int = 0
     compliance: float | None = None
@@ -81,13 +91,16 @@ def _worker() -> None:
             continue
         with LOCK:
             job = JOBS.get(job_id)
-        if job is None:
+        if job is None or job.status == "canceled":  # canceled while queued
+            JOB_QUEUE.task_done()
             continue
         job.status = "running"
         job.started = time.time()
 
         def progress(phase: str, detail: dict) -> None:
             with LOCK:
+                if job.cancel_requested:
+                    raise JobCancelled()
                 job.phase = phase
                 if "iteration" in detail:
                     job.iteration = detail["iteration"]
@@ -103,6 +116,11 @@ def _worker() -> None:
                 job.result = result.to_dict()
                 job.status = "done"
                 job.phase = "done"
+        except JobCancelled:
+            with LOCK:
+                job.status = "canceled"
+                job.phase = "canceled"
+            shutil.rmtree(Path(job.input_path).parent, ignore_errors=True)
         except Exception as exc:  # report, never crash the worker
             with LOCK:
                 job.status = "error"
@@ -116,6 +134,8 @@ def _worker() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     JOBS_DIR.mkdir(exist_ok=True)
+    shutil.rmtree(UPLOADS_DIR, ignore_errors=True)
+    UPLOADS_DIR.mkdir()
     thread = threading.Thread(target=_worker, name="topopt-worker", daemon=True)
     thread.start()
     yield
@@ -131,14 +151,45 @@ def _queue_position(job_id: str) -> int | None:
     return queued.index(job_id) + 1 if job_id in queued else None
 
 
+def _upload_path(upload_id: str) -> Path:
+    path = UPLOADS_DIR / upload_id
+    if len(upload_id) != 32 or not upload_id.isalnum() or not path.exists():
+        raise HTTPException(status_code=404, detail="upload not found")
+    return path
+
+
+@app.post("/api/uploads", status_code=201)
+def create_upload() -> dict:
+    upload_id = uuid.uuid4().hex
+    (UPLOADS_DIR / upload_id).touch()
+    return {"id": upload_id}
+
+
+@app.post("/api/uploads/{upload_id}/chunks")
+async def append_chunk(upload_id: str, request: Request) -> dict:
+    """Append the raw request body to the upload. Chunks must arrive in order."""
+    path = _upload_path(upload_id)
+    size = path.stat().st_size
+    with path.open("ab") as out:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                path.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="file too large (max 200 MB)")
+            out.write(chunk)
+    return {"id": upload_id, "received": size}
+
+
 @app.post("/api/jobs")
 async def create_job(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
     resolution: int = Form(96),
     volfrac: float = Form(0.35),
     fix_face: str = Form("bottom"),
     load_face: str = Form("top"),
     load_dir: str = Form("-z"),
+    load_extent: float = Form(0.25),
     rmin: float = Form(2.0),
     max_iter: int = Form(60),
 ) -> JSONResponse:
@@ -148,6 +199,7 @@ async def create_job(
         fix_face=fix_face,
         load_face=load_face,
         load_dir=load_dir,
+        load_extent=load_extent,
         rmin=rmin,
         max_iter=max_iter,
     )
@@ -155,26 +207,33 @@ async def create_job(
         params.validate()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    if (file is None) == (upload_id is None):
+        raise HTTPException(status_code=422, detail="provide either a file or an upload_id")
+    upload = _upload_path(upload_id) if upload_id is not None else None
 
     job_id = uuid.uuid4().hex[:12]
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True)
     input_path = job_dir / "input.stl"
 
-    size = 0
-    with tempfile.NamedTemporaryFile(dir=job_dir, delete=False) as tmp:
-        while chunk := await file.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_UPLOAD_BYTES:
-                tmp.close()
-                shutil.rmtree(job_dir, ignore_errors=True)
-                raise HTTPException(status_code=413, detail="file too large (max 200 MB)")
-            tmp.write(chunk)
-        tmp_path = tmp.name
+    if upload is not None:
+        size = upload.stat().st_size
+        upload.rename(input_path)
+    else:
+        size = 0
+        with tempfile.NamedTemporaryFile(dir=job_dir, delete=False) as tmp:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    tmp.close()
+                    shutil.rmtree(job_dir, ignore_errors=True)
+                    raise HTTPException(status_code=413, detail="file too large (max 200 MB)")
+                tmp.write(chunk)
+            tmp_path = tmp.name
+        Path(tmp_path).rename(input_path)
     if size == 0:
         shutil.rmtree(job_dir, ignore_errors=True)
         raise HTTPException(status_code=422, detail="empty upload")
-    Path(tmp_path).rename(input_path)
 
     job = Job(
         id=job_id,
@@ -189,11 +248,36 @@ async def create_job(
     return JSONResponse(job.to_public(_queue_position(job_id)), status_code=201)
 
 
+@app.get("/api/jobs")
+def list_jobs() -> list[dict]:
+    """All jobs, newest first — lets the frontend reattach after a reload."""
+    with LOCK:
+        jobs = sorted(JOBS.values(), key=lambda j: j.created, reverse=True)
+    return [j.to_public(_queue_position(j.id)) for j in jobs]
+
+
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+    return job.to_public(_queue_position(job_id))
+
+
+@app.delete("/api/jobs/{job_id}")
+def cancel_job(job_id: str) -> dict:
+    """Cancel a queued job immediately; a running one stops at its next iteration."""
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    with LOCK:
+        if job.status == "queued":
+            job.status = "canceled"
+            job.phase = "canceled"
+            job.finished = time.time()
+            shutil.rmtree(Path(job.input_path).parent, ignore_errors=True)
+        elif job.status == "running":
+            job.cancel_requested = True
     return job.to_public(_queue_position(job_id))
 
 

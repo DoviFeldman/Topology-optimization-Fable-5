@@ -33,6 +33,16 @@
   #run { background: var(--accent); color: #fff; }
   #download { background: var(--accent2); color: #06281c; display: none; }
   #progresswrap { display: none; flex-direction: column; gap: 6px; }
+  #cancel { background: var(--panel2); color: var(--muted); border: 1px solid var(--border); padding: 7px; font-size: 12px; }
+  #presets, #styles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #styles { grid-template-columns: 1fr 1fr 1fr; }
+  .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 6px; font-size: 12px; text-align: center; cursor: pointer; user-select: none; transition: border-color .15s, color .15s; color: var(--muted); }
+  .chip:hover { border-color: var(--accent); }
+  .chip.active { border-color: var(--accent); color: var(--text); background: var(--panel2); }
+  .note { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+  label span[title] { cursor: help; opacity: .7; }
+  #bclegend { position: absolute; top: 14px; right: 14px; z-index: 5; font-size: 11.5px; color: var(--muted); background: rgba(24,29,37,.85); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; display: none; line-height: 1.6; backdrop-filter: blur(4px); }
+  #bclegend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
   #bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
   #barfill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .4s; }
   #phase { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
@@ -62,44 +72,65 @@
   <div id="fileinfo"></div>
 
   <div class="group">
-    <h2>Optimization</h2>
-    <div>
-      <label>Resolution <b id="resv">96</b></label>
-      <input type="range" id="res" min="24" max="160" step="8" value="96">
+    <h2>Scenario &mdash; how is the part used?</h2>
+    <div id="presets">
+      <div class="chip" data-preset="bridge">🌉 Bridge</div>
+      <div class="chip" data-preset="bracket">📐 Shelf bracket</div>
+      <div class="chip" data-preset="tower">🗼 Tower / stand</div>
+      <div class="chip" data-preset="hook">🪝 Hanging hook</div>
+      <div class="chip" data-preset="custom" style="grid-column: span 2">⚙️ Custom…</div>
     </div>
-    <div>
-      <label>Keep material <b id="volv">35%</b></label>
-      <input type="range" id="vol" min="10" max="80" step="5" value="35">
+    <div class="note" id="scenarioHint"></div>
+    <div id="customBC" style="display:none; flex-direction: column; gap: 10px;">
+      <div class="row">
+        <div>
+          <label>Anchored face <span title="Where the part is bolted/glued to the world — it cannot move here.">ⓘ</span></label>
+          <select id="fix">
+            <option value="bottom" selected>bottom</option><option value="top">top</option>
+            <option value="left">left</option><option value="right">right</option>
+            <option value="front">front</option><option value="back">back</option>
+          </select>
+        </div>
+        <div>
+          <label>Force pushes on <span title="The face where the force is applied.">ⓘ</span></label>
+          <select id="loadface">
+            <option value="top" selected>top</option><option value="bottom">bottom</option>
+            <option value="left">left</option><option value="right">right</option>
+            <option value="front">front</option><option value="back">back</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Force direction</label>
+          <select id="dir">
+            <option value="-z" selected>-z (down)</option><option value="+z">+z (up)</option>
+            <option value="-x">-x</option><option value="+x">+x</option>
+            <option value="-y">-y</option><option value="+y">+y</option>
+          </select>
+        </div>
+        <div>
+          <label>Force area <b id="extv">25%</b> <span title="How much of the face the force covers. Small = concentrated force = dramatic branching structures.">ⓘ</span></label>
+          <input type="range" id="ext" min="5" max="100" step="5" value="25" style="margin-top: 8px;">
+        </div>
+      </div>
     </div>
   </div>
 
   <div class="group">
-    <h2>Boundary conditions</h2>
-    <div class="row">
-      <div>
-        <label>Fixed face</label>
-        <select id="fix">
-          <option value="bottom" selected>bottom</option><option value="top">top</option>
-          <option value="left">left</option><option value="right">right</option>
-          <option value="front">front</option><option value="back">back</option>
-        </select>
-      </div>
-      <div>
-        <label>Loaded face</label>
-        <select id="loadface">
-          <option value="top" selected>top</option><option value="bottom">bottom</option>
-          <option value="left">left</option><option value="right">right</option>
-          <option value="front">front</option><option value="back">back</option>
-        </select>
-      </div>
+    <h2>Look</h2>
+    <div id="styles">
+      <div class="chip" data-style="skeletal">🕸️ Skeletal</div>
+      <div class="chip" data-style="balanced">🌿 Balanced</div>
+      <div class="chip" data-style="solid">🪨 Solid</div>
     </div>
     <div>
-      <label>Load direction</label>
-      <select id="dir">
-        <option value="-z" selected>-z (down)</option><option value="+z">+z (up)</option>
-        <option value="-x">-x</option><option value="+x">+x</option>
-        <option value="-y">-y</option><option value="+y">+y</option>
-      </select>
+      <label>Keep material <b id="volv">28%</b></label>
+      <input type="range" id="vol" min="10" max="80" step="1" value="28">
+    </div>
+    <div>
+      <label>Resolution (detail) <b id="resv">96</b> <span title="Voxels along the longest axis. Higher = finer struts but much slower. 48-64 for drafts, 96+ for final quality.">ⓘ</span></label>
+      <input type="range" id="res" min="24" max="160" step="8" value="96">
     </div>
   </div>
 
@@ -108,6 +139,7 @@
   <div id="progresswrap">
     <div id="phase"><span id="phasename">queued</span><span id="phaseiter"></span></div>
     <div id="bar"><div id="barfill"></div></div>
+    <button id="cancel">Cancel</button>
   </div>
 
   <button id="download">Download optimized STL</button>
@@ -120,6 +152,10 @@
     <div class="tab hidden" id="tabResult">Result</div>
   </div>
   <div id="canvas3d"></div>
+  <div id="bclegend">
+    <span class="sw" style="background:#4f8ef7"></span>anchored (can't move)<br>
+    <span class="sw" style="background:#f7a44f"></span>force pushes here
+  </div>
   <div id="hint">drag to rotate &middot; scroll to zoom &middot; right-drag to pan</div>
 </div>
 
@@ -176,6 +212,57 @@ function showMesh(which) {
   if (resultMesh) resultMesh.visible = which === 'result';
   document.getElementById('tabInput').classList.toggle('active', which === 'input');
   document.getElementById('tabResult').classList.toggle('active', which === 'result');
+  updateBCOverlay();
+}
+
+// ---------- boundary-condition overlay (anchor planes + force arrow) ----------
+// face -> [axis, sign] in STL (z-up) space; the group carries the same
+// z-up -> y-up rotation as the meshes, so face math stays in STL coords.
+const FACE_INFO = { left: [0,-1], right: [0,1], front: [1,-1], back: [1,1], bottom: [2,-1], top: [2,1] };
+const DIR_VEC = { '+x': [1,0,0], '-x': [-1,0,0], '+y': [0,1,0], '-y': [0,-1,0], '+z': [0,0,1], '-z': [0,0,-1] };
+let bcGroup = null;
+
+function facePatch(bb, face, color, frac, circle) {
+  const [axis, sign] = FACE_INFO[face];
+  const size = bb.getSize(new THREE.Vector3()), center = bb.getCenter(new THREE.Vector3());
+  const dims = [size.x, size.y, size.z];
+  const [u, v] = [[1,2],[0,2],[0,1]][axis];
+  const geo = circle ? new THREE.CircleGeometry(0.5, 40) : new THREE.PlaneGeometry(1, 1);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false });
+  const patch = new THREE.Mesh(geo, mat);
+  patch.scale.set(Math.max(dims[u] * frac, dims[u] * 0.04), Math.max(dims[v] * frac, dims[v] * 0.04), 1);
+  if (axis === 0) patch.rotation.y = Math.PI / 2;
+  if (axis === 1) patch.rotation.x = Math.PI / 2;
+  patch.position.copy(center).setComponent(axis, center.getComponent(axis) + sign * dims[axis] * 0.52);
+  return patch;
+}
+
+function loadArrow(bb, face, dirName, color) {
+  const [axis, sign] = FACE_INFO[face];
+  const size = bb.getSize(new THREE.Vector3()), center = bb.getCenter(new THREE.Vector3());
+  const dims = [size.x, size.y, size.z];
+  const tip = center.clone().setComponent(axis, center.getComponent(axis) + sign * dims[axis] / 2);
+  const d = new THREE.Vector3(...DIR_VEC[dirName]);
+  const len = Math.max(dims[0], dims[1], dims[2]) * 0.35;
+  const origin = tip.clone().sub(d.clone().multiplyScalar(len)); // tip lands on the loaded spot
+  return new THREE.ArrowHelper(d, origin, len, color, len * 0.3, len * 0.15);
+}
+
+function updateBCOverlay() {
+  if (bcGroup) { scene.remove(bcGroup); bcGroup = null; }
+  const legend = document.getElementById('bclegend');
+  if (!inputMesh || activeView !== 'input') { legend.style.display = 'none'; return; }
+  const geo = inputMesh.geometry;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const bc = currentBC();
+  bcGroup = new THREE.Group();
+  bcGroup.rotation.x = -Math.PI / 2;
+  for (const f of bc.fix) bcGroup.add(facePatch(bb, f, 0x4f8ef7, 1.0, false));
+  bcGroup.add(facePatch(bb, bc.load, 0xf7a44f, bc.extent, true));
+  bcGroup.add(loadArrow(bb, bc.load, bc.dir, 0xf7a44f));
+  scene.add(bcGroup);
+  legend.style.display = 'block';
 }
 
 function setGeometry(which, geometry) {
@@ -218,31 +305,114 @@ function acceptFile(f) {
 }
 
 const res = document.getElementById('res'), vol = document.getElementById('vol');
+const ext = document.getElementById('ext');
 res.addEventListener('input', () => document.getElementById('resv').textContent = res.value);
 vol.addEventListener('input', () => document.getElementById('volv').textContent = vol.value + '%');
+ext.addEventListener('input', () => { document.getElementById('extv').textContent = ext.value + '%'; updateBCOverlay(); });
+['fix', 'loadface', 'dir'].forEach(id => document.getElementById(id).addEventListener('change', updateBCOverlay));
+
+// ---------- scenario presets & structure styles ----------
+const PRESETS = {
+  bridge:  { fix: 'left,right', load: 'top', dir: '-z',
+             hint: 'Held up at both ends; weight presses down in the middle. Expect an organic arch with webbing.' },
+  bracket: { fix: 'left', load: 'top', dir: '-z',
+             hint: 'Bolted to a wall on its left side; weight presses down on top. Expect a branching cantilever.' },
+  tower:   { fix: 'bottom', load: 'top', dir: '-z',
+             hint: 'Stands on the ground; weight presses down from above. Expect tree-like legs.' },
+  hook:    { fix: 'top', load: 'bottom', dir: '-z',
+             hint: 'Hangs from the ceiling; the load pulls down at the bottom. Expect taut tendon-like strands.' },
+  custom:  { hint: 'Blue = anchored. Orange circle = where the force lands, arrow = its direction. Smaller force area ⇒ more dramatic webs.' },
+};
+const STYLES = {
+  skeletal: { vol: 18, rmin: 1.4, ext: 15 },
+  balanced: { vol: 28, rmin: 1.8, ext: 25 },
+  solid:    { vol: 45, rmin: 2.4, ext: 60 },
+};
+let preset = 'bridge', rmin = 1.8;
+
+function currentBC() {
+  const p = PRESETS[preset];
+  return {
+    fix: (preset === 'custom' ? document.getElementById('fix').value : p.fix).split(','),
+    load: preset === 'custom' ? document.getElementById('loadface').value : p.load,
+    dir: preset === 'custom' ? document.getElementById('dir').value : p.dir,
+    extent: ext.value / 100,
+  };
+}
+
+document.querySelectorAll('#presets .chip').forEach(ch => ch.addEventListener('click', () => {
+  preset = ch.dataset.preset;
+  document.querySelectorAll('#presets .chip').forEach(c => c.classList.toggle('active', c === ch));
+  document.getElementById('customBC').style.display = preset === 'custom' ? 'flex' : 'none';
+  document.getElementById('scenarioHint').textContent = PRESETS[preset].hint;
+  updateBCOverlay();
+}));
+document.querySelectorAll('#styles .chip').forEach(ch => ch.addEventListener('click', () => {
+  document.querySelectorAll('#styles .chip').forEach(c => c.classList.toggle('active', c === ch));
+  const s = STYLES[ch.dataset.style];
+  vol.value = s.vol;
+  document.getElementById('volv').textContent = s.vol + '%';
+  ext.value = s.ext;
+  document.getElementById('extv').textContent = s.ext + '%';
+  rmin = s.rmin;
+  updateBCOverlay();
+}));
+document.querySelector('#presets .chip[data-preset="bridge"]').classList.add('active');
+document.querySelector('#styles .chip[data-style="balanced"]').classList.add('active');
+document.getElementById('scenarioHint').textContent = PRESETS.bridge.hint;
 
 function setStatus(msg, isErr = false) {
   statusEl.textContent = msg;
   statusEl.className = isErr ? 'err' : '';
 }
 
+// Proxies in front of the app (Codespaces port forwarding) reject bodies
+// over ~16 MB, so bigger files go up in slices the server reassembles.
+const CHUNK_BYTES = 8 * 1024 * 1024;
+
+async function apiError(r) {
+  try { return (await r.clone().json()).detail || r.statusText; }
+  catch { return `server returned ${r.status} ${r.statusText}`; }
+}
+
+async function uploadInChunks(file) {
+  const create = await fetch('/api/uploads', { method: 'POST' });
+  if (!create.ok) throw new Error(await apiError(create));
+  const { id } = await create.json();
+  for (let sent = 0; sent < file.size; ) {
+    const slice = file.slice(sent, sent + CHUNK_BYTES);
+    const r = await fetch(`/api/uploads/${id}/chunks`, { method: 'POST', body: slice });
+    if (!r.ok) throw new Error(await apiError(r));
+    sent += slice.size;
+    setStatus(`Uploading… ${Math.round(100 * sent / file.size)}%`);
+  }
+  return id;
+}
+
 runBtn.addEventListener('click', async () => {
   if (!currentFile) return;
+  const bc = currentBC();
   const fd = new FormData();
-  fd.append('file', currentFile);
   fd.append('resolution', res.value);
   fd.append('volfrac', (vol.value / 100).toString());
-  fd.append('fix_face', document.getElementById('fix').value);
-  fd.append('load_face', document.getElementById('loadface').value);
-  fd.append('load_dir', document.getElementById('dir').value);
+  fd.append('fix_face', bc.fix.join(','));
+  fd.append('load_face', bc.load);
+  fd.append('load_dir', bc.dir);
+  fd.append('load_extent', bc.extent.toString());
+  fd.append('rmin', rmin.toString());
   runBtn.disabled = true;
   dlBtn.style.display = 'none';
   document.getElementById('tabResult').classList.add('hidden');
   document.getElementById('progresswrap').style.display = 'flex';
   setStatus('Uploading…');
   try {
+    if (currentFile.size > CHUNK_BYTES) {
+      fd.append('upload_id', await uploadInChunks(currentFile));
+    } else {
+      fd.append('file', currentFile);
+    }
     const r = await fetch('/api/jobs', { method: 'POST', body: fd });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    if (!r.ok) throw new Error(await apiError(r));
     currentJob = (await r.json()).id;
     setStatus('');
     pollTimer = setInterval(poll, 1200);
@@ -256,17 +426,39 @@ runBtn.addEventListener('click', async () => {
 // phases mapped onto the progress bar: optimizing owns 15..85%
 const PHASE_BASE = { queued: 2, loading: 6, voxelizing: 10, optimizing: 15, meshing: 88, exporting: 95, done: 100 };
 
+function fmtTime(s) {
+  return s >= 90 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`;
+}
+
+function endRun() {
+  clearInterval(pollTimer);
+  runBtn.disabled = false;
+  document.getElementById('progresswrap').style.display = 'none';
+  cancelBtn.disabled = false;
+}
+
+let pollFails = 0;
 async function poll() {
   try {
     const r = await fetch(`/api/jobs/${currentJob}`);
-    if (!r.ok) throw new Error('job lost');
+    if (r.status === 404) {  // server restarted and forgot the job
+      endRun();
+      setStatus('Job no longer exists on the server — please run it again.', true);
+      return;
+    }
+    if (!r.ok) throw new Error(await apiError(r));
     const j = await r.json();
+    pollFails = 0;
     let pct = PHASE_BASE[j.phase] ?? 2;
     let iterText = '';
     if (j.phase === 'optimizing' && j.total_iterations > 0) {
       pct = 15 + 70 * (j.iteration / j.total_iterations);
       iterText = `iter ${j.iteration}/${j.total_iterations}` +
         (j.compliance ? ` · C=${j.compliance.toExponential(2)}` : '');
+      if (j.iteration >= 2 && j.elapsed_seconds) {
+        const left = (j.total_iterations - j.iteration) * (j.elapsed_seconds / j.iteration);
+        iterText += ` · ~${fmtTime(left)} left`;
+      }
     }
     if (j.status === 'queued' && j.queue_position > 1) iterText = `#${j.queue_position} in queue`;
     document.getElementById('phasename').textContent = j.phase;
@@ -275,28 +467,67 @@ async function poll() {
     if (j.status === 'done') {
       clearInterval(pollTimer);
       document.getElementById('barfill').style.width = '100%';
-      setStatus(`Done in ${j.elapsed_seconds}s — ${j.result.faces.toLocaleString()} faces, watertight: ${j.result.watertight}`);
+      setStatus(`Done in ${fmtTime(j.elapsed_seconds)} — ${j.result.faces.toLocaleString()} faces, watertight: ${j.result.watertight}`);
       runBtn.disabled = false;
       dlBtn.style.display = 'block';
       document.getElementById('tabResult').classList.remove('hidden');
       const buf = await (await fetch(`/api/jobs/${currentJob}/preview`)).arrayBuffer();
       setGeometry('result', new STLLoader().parse(buf));
+      if (!currentFile) showMesh('result');  // reattached after reload: no input mesh to show
     } else if (j.status === 'error') {
-      clearInterval(pollTimer);
+      endRun();
       setStatus('Optimization failed: ' + j.error, true);
-      runBtn.disabled = false;
-      document.getElementById('progresswrap').style.display = 'none';
+    } else if (j.status === 'canceled') {
+      endRun();
+      setStatus('Canceled.');
+      reattach();  // pick up the next queued job, if any
     }
   } catch (err) {
-    clearInterval(pollTimer);
-    setStatus(err.message, true);
-    runBtn.disabled = false;
+    // transient network blips (or a proxy hiccup) shouldn't kill the run view
+    if (++pollFails >= 5) {
+      endRun();
+      setStatus('Lost contact with the server: ' + err.message, true);
+    }
   }
 }
 
 dlBtn.addEventListener('click', () => { location.href = `/api/jobs/${currentJob}/result`; });
 document.getElementById('tabInput').addEventListener('click', () => showMesh('input'));
 document.getElementById('tabResult').addEventListener('click', () => showMesh('result'));
+
+const cancelBtn = document.getElementById('cancel');
+cancelBtn.addEventListener('click', async () => {
+  if (!currentJob) return;
+  cancelBtn.disabled = true;
+  setStatus('Canceling… (a running job stops at its next iteration)');
+  try {
+    const r = await fetch(`/api/jobs/${currentJob}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await apiError(r));
+  } catch (err) {
+    cancelBtn.disabled = false;
+    setStatus('Cancel failed: ' + err.message, true);
+  }
+});
+
+// After a page reload, latch onto whatever is still running server-side
+// instead of letting the user unknowingly queue up duplicates.
+async function reattach() {
+  try {
+    const jobs = await (await fetch('/api/jobs')).json();
+    const active = jobs.filter(j => j.status === 'running' || j.status === 'queued');
+    if (!active.length) return;
+    currentJob = (active.find(j => j.status === 'running') || active[active.length - 1]).id;
+    runBtn.disabled = true;
+    cancelBtn.disabled = false;
+    document.getElementById('progresswrap').style.display = 'flex';
+    setStatus(active.length > 1
+      ? `Rejoined a job already in progress (+${active.length - 1} more queued)`
+      : 'Rejoined a job already in progress');
+    pollTimer = setInterval(poll, 1200);
+    poll();
+  } catch { /* no server contact — normal page behavior */ }
+}
+reattach();
 </script>
 </body>
 </html>

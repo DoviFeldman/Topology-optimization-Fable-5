@@ -77,11 +77,30 @@ Progress prints to the terminal. All flags are optional; run
 |---|---|---|
 | `--resolution` | 96 | voxels along the longest axis (24–160). Higher = finer + slower |
 | `--volfrac` | 0.35 | fraction of material to keep (0.1–0.8) |
-| `--fix` | bottom | face that is clamped (bottom/top/left/right/front/back) |
+| `--fix` | bottom | clamped face(s), comma-separated: `left,right` makes a bridge |
 | `--load` | top | face that carries the load |
 | `--dir` | -z | direction of the load (+x, -x, +y, -y, +z, -z) |
+| `--load-extent` | 0.25 | fraction of the loaded face carrying force (small patch ⇒ dramatic branching structures; 1.0 = whole face) |
 | `--rmin` | 2.0 | smoothing filter radius in voxels (1.5–2.5 sensible) |
 | `--max-iter` | 60 | max optimization iterations |
+
+### Getting the cool spiderweb look
+
+Blobs come from spread-out loads and high volume fractions. For striking
+organic structures: concentrate the load (`--load-extent 0.15`), keep less
+material (`--volfrac 0.18`), lower the filter radius (`--rmin 1.4`), and give
+the optimizer room to grow struts (`--resolution 96+`). Example — the classic
+bridge:
+
+```bash
+python optimize.py test_shapes/beam.stl bridge.stl \
+    --fix left,right --load top --dir -z \
+    --load-extent 0.15 --volfrac 0.18 --rmin 1.4
+```
+
+The web UI wraps all of this in scenario presets (bridge / bracket / tower /
+hook) and skeletal-to-solid style chips, and draws the anchors and force
+arrow directly on your model.
 
 ## Option D: Deploy on a VPS
 
@@ -97,10 +116,11 @@ See **[deploy.md](deploy.md)** — full beginner-friendly walkthrough
    non-manifold, even leaky meshes, and handles 1–2M-triangle files in bounded
    memory. The input mesh is discarded afterwards — the rest of the pipeline
    only sees voxels.
-2. **Boundary conditions** — by default the bottom layer of voxels is clamped
-   and a distributed downward load is applied to the top layer. Both faces and
-   the load direction are configurable; regions snap to the nearest occupied
-   voxels of the chosen face.
+2. **Boundary conditions** — one or more faces are clamped (they can't move)
+   and a load pushes on a patch of another face. The patch size is tunable:
+   a concentrated patch produces distinct branching force paths, a whole-face
+   load produces uniform slabs. Regions snap to the nearest occupied voxels
+   of the chosen face, so parts with sloped or stepped faces work too.
 3. **SIMP optimization** — classic top3d-style compliance minimization:
    8-node hexahedral elements, penalization p=3, cone density filter, and
    Optimality Criteria updates, for up to 60 iterations or until the design

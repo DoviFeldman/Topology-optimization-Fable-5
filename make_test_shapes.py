@@ -34,6 +34,11 @@ def make_box_with_hole() -> trimesh.Trimesh:
     return mesh
 
 
+def make_beam() -> trimesh.Trimesh:
+    """120 x 30 x 40 mm beam — the classic bridge demo (fix left+right, load top)."""
+    return trimesh.creation.box(extents=[120.0, 30.0, 40.0])
+
+
 def make_l_bracket() -> trimesh.Trimesh:
     """Classic L-bracket: 80 x 80 mm legs, 30 mm thick legs, 20 mm deep."""
     pts = [(0, 0), (80, 0), (80, 30), (30, 30), (30, 80), (0, 80)]
@@ -66,6 +71,7 @@ def main() -> None:
         "box.stl": make_box(),
         "box_with_hole.stl": make_box_with_hole(),
         "l_bracket.stl": make_l_bracket(),
+        "beam.stl": make_beam(),
     }
     if args.big:
         shapes["big_box_with_hole.stl"] = make_big(make_box_with_hole())

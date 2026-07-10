@@ -32,11 +32,18 @@ def main(argv: list[str] | None = None) -> int:
         "--volfrac", type=float, default=0.35,
         help="fraction of material to keep (0.1..0.8)",
     )
-    parser.add_argument("--fix", choices=FACES, default="bottom", help="fixed (support) face")
+    parser.add_argument(
+        "--fix", default="bottom",
+        help=f"fixed (support) face(s), comma-separated, from {FACES}",
+    )
     parser.add_argument("--load", choices=FACES, default="top", help="loaded face")
     parser.add_argument(
         "--dir", choices=sorted(DIRECTIONS), default="-z", dest="load_dir",
         help="load direction",
+    )
+    parser.add_argument(
+        "--load-extent", type=float, default=0.25,
+        help="fraction of the loaded face carrying force (1.0 = whole face)",
     )
     parser.add_argument("--rmin", type=float, default=2.0, help="filter radius in voxels")
     parser.add_argument("--max-iter", type=int, default=60, help="max SIMP iterations")
@@ -55,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         fix_face=args.fix,
         load_face=args.load,
         load_dir=args.load_dir,
+        load_extent=args.load_extent,
         rmin=args.rmin,
         max_iter=args.max_iter,
         upsample=not args.no_upsample,
