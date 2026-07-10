@@ -59,6 +59,11 @@ def main(argv: list[str] | None = None) -> int:
         help="fraction of the loaded face carrying force (1.0 = whole face)",
     )
     parser.add_argument(
+        "--hollow-load-face", action="store_true",
+        help="do NOT keep the whole loaded face as a solid plate "
+             "(default keeps it, so mating surfaces survive)",
+    )
+    parser.add_argument(
         "--load-cases", type=int, choices=(1, 3, 5), default=1,
         help="force directions (tilts around --dir); more = webbier, slower",
     )
@@ -98,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         load_face=args.load,
         load_dir=args.load_dir,
         load_extent=args.load_extent,
+        solid_load_face=not args.hollow_load_face,
         load_cases=args.load_cases,
         shape_preserve=args.shape_preserve,
         domain_expand=args.domain_expand,

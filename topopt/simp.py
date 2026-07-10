@@ -116,8 +116,15 @@ def simp_optimize(
 
     dv = filt.backward(np.ones(nel))  # constant across iterations
 
+    # volfrac means "fraction of the *carvable* material": passive pads and
+    # shell floors are mandatory mass ON TOP of it. Without this, protections
+    # can swallow the whole budget and the free interior collapses into a
+    # structureless gray that meshes as a shrunken blob.
+    base = np.where(passive, 1.0, floor)
+    vol_target_eff = min(0.9, float(np.mean(base + (1.0 - base) * volfrac)))
+
     result = SimpResult(density_grid=np.zeros(occ.shape, dtype=np.float32))
-    vol_target = volfrac  # adjusted by feedback so filtered volume hits volfrac
+    vol_target = vol_target_eff  # adjusted by feedback so filtered volume hits it
     change = 1.0
 
     for it in range(1, max_iter + 1):
@@ -138,10 +145,14 @@ def simp_optimize(
         x_phys[passive] = 1.0
         np.clip(x_phys, 0.0, 1.0, out=x_phys)
 
-        # feedback: nudge the bisection target so achieved volume == volfrac
+        # feedback: nudge the bisection target so achieved volume hits the goal
         achieved = float(x_phys.mean())
         vol_target = float(
-            np.clip(vol_target + 0.6 * (volfrac - achieved), 0.5 * volfrac, 1.2 * volfrac)
+            np.clip(
+                vol_target + 0.6 * (vol_target_eff - achieved),
+                0.5 * vol_target_eff,
+                min(0.95, 1.2 * vol_target_eff),
+            )
         )
 
         change = float(np.max(np.abs(x_new - x)))
@@ -150,7 +161,10 @@ def simp_optimize(
         result.volume_fraction = achieved
         if progress is not None:
             progress(it, max_iter, c, change)
-        if change < change_tol:
+        # a uniform gray start barely moves in the first iterations, which
+        # looks like convergence but isn't — never stop before the design has
+        # had a real chance to polarize
+        if change < change_tol and it >= min(12, max_iter):
             result.converged = True
             break
 
