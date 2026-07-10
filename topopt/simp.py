@@ -85,6 +85,7 @@ def simp_optimize(
     move: float = 0.2,
     case_weights: np.ndarray | None = None,
     min_density: np.ndarray | None = None,
+    passive: np.ndarray | None = None,
     progress: ProgressFn | None = None,
 ) -> SimpResult:
     """Run the SIMP loop and return the final physical density field.
@@ -102,8 +103,9 @@ def simp_optimize(
     fem = FEModel(occ, fixed_vox, load_vox, load_dir, case_weights=case_weights)
     filt = DensityFilter(occ, rmin)
 
-    passive_grid = ndimage.binary_dilation(fixed_vox | load_vox, iterations=1) & occ
-    passive = passive_grid[occ]
+    if passive is None:  # default: just keep the BCs attached to material
+        passive = ndimage.binary_dilation(fixed_vox | load_vox, iterations=1) & occ
+    passive = (passive & occ)[occ]
 
     nel = fem.nel
     floor = np.zeros(nel) if min_density is None else np.clip(min_density, 0.0, 1.0)

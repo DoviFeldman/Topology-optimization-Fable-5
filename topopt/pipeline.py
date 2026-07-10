@@ -6,6 +6,7 @@ Phases (reported via the progress callback):
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, asdict
 from typing import Callable
 
@@ -57,6 +58,10 @@ class Params:
     domain_expand: float = 0.0  # 0..0.3: grow the buildable space outward by
     #   this fraction of the resolution, letting struts form outside the input
     rmin: float = 2.0  # density-filter radius, in voxels (1.5..2.5)
+    min_feature_mm: float = 1.0  # printability: no strut thinner than this (mm);
+    #   also sets the thickness of the solid pads kept at anchors and load
+    rotation: str = ""  # optional row-major 3x3 matrix (JSON, 9 floats) applied
+    #   to the input mesh before everything else — reorient without re-exporting
     max_iter: int = 60
     upsample: bool = True  # 2x trilinear upsample before marching cubes
     taubin_iterations: int = 20
@@ -87,6 +92,15 @@ class Params:
             raise ValueError("domain_expand must be within 0..0.3")
         if not 1.0 <= self.rmin <= 4.0:
             raise ValueError("rmin must be within 1.0..4.0")
+        if not 0.0 <= self.min_feature_mm <= 5.0:
+            raise ValueError("min_feature_mm must be within 0..5")
+        if self.rotation:
+            try:
+                r = np.array(json.loads(self.rotation), dtype=float)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"rotation is not a valid JSON matrix: {exc}")
+            if r.shape != (9,) and r.shape != (3, 3):
+                raise ValueError("rotation must contain 9 numbers (row-major 3x3)")
         if not 5 <= self.max_iter <= 200:
             raise ValueError("max_iter must be within 5..200")
 
@@ -169,6 +183,10 @@ def run_pipeline(
 
     report("loading", message="reading and repairing input mesh")
     mesh = load_mesh(input_path)
+    if params.rotation:
+        t = np.eye(4)
+        t[:3, :3] = np.array(json.loads(params.rotation), dtype=float).reshape(3, 3)
+        mesh.apply_transform(t)
     n_input_faces = len(mesh.faces)
 
     report("voxelizing", message=f"voxelizing {n_input_faces} triangles")
@@ -205,6 +223,21 @@ def run_pipeline(
     if overlap.any():
         load_vox &= ~overlap
 
+    # printability: no strut thinner than min_feature_mm. The density filter's
+    # radius sets the minimum member size (~2 * rmin voxels), so give it a
+    # floor in voxel units derived from the physical requirement.
+    rmin_eff = max(params.rmin, 0.5 * params.min_feature_mm / grid.pitch)
+
+    # contact pads: the anchored faces and the loaded patch stay fully solid
+    # for at least min_feature_mm of depth, so the part still sits flat where
+    # it used to and the force has a solid boss to connect to — the optimizer
+    # may only carve *between* the pads, never the pads themselves.
+    pad_it = max(2, int(np.ceil(params.min_feature_mm / grid.pitch)))
+    passive_grid = (
+        ndimage.binary_dilation(fixed_vox, iterations=pad_it)
+        | ndimage.binary_dilation(load_vox, iterations=pad_it)
+    ) & grid.occ
+
     # load cases: the main direction plus tilted companions. A design that
     # must resist several force directions at once develops cross-braced
     # webbing instead of a single strut path.
@@ -237,10 +270,11 @@ def run_pipeline(
         load_vox,
         np.array(dirs),
         volfrac=params.volfrac,
-        rmin=params.rmin,
+        rmin=rmin_eff,
         max_iter=params.max_iter,
         case_weights=np.array(weights),
         min_density=floor_vec,
+        passive=passive_grid,
         progress=simp_progress,
     )
 

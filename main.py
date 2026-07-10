@@ -194,6 +194,8 @@ async def create_job(
     shape_preserve: float = Form(0.0),
     domain_expand: float = Form(0.0),
     rmin: float = Form(2.0),
+    min_feature_mm: float = Form(1.0),
+    rotation: str = Form(""),
     max_iter: int = Form(60),
 ) -> JSONResponse:
     params = Params(
@@ -207,6 +209,8 @@ async def create_job(
         shape_preserve=shape_preserve,
         domain_expand=domain_expand,
         rmin=rmin,
+        min_feature_mm=min_feature_mm,
+        rotation=rotation,
         max_iter=max_iter,
     )
     try:

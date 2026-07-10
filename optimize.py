@@ -9,12 +9,25 @@ Example:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 
+import numpy as np
 import trimesh
 
 from topopt.pipeline import DIRECTIONS, FACES, Params, run_pipeline
+
+
+def _rotation_json(spec: str) -> str:
+    """'90,0,-90' (degrees about x, y, z, applied in order) -> 3x3 JSON."""
+    if not spec:
+        return ""
+    ax, ay, az = (np.radians(float(v)) for v in spec.split(","))
+    rx = np.array([[1, 0, 0], [0, np.cos(ax), -np.sin(ax)], [0, np.sin(ax), np.cos(ax)]])
+    ry = np.array([[np.cos(ay), 0, np.sin(ay)], [0, 1, 0], [-np.sin(ay), 0, np.cos(ay)]])
+    rz = np.array([[np.cos(az), -np.sin(az), 0], [np.sin(az), np.cos(az), 0], [0, 0, 1]])
+    return json.dumps((rz @ ry @ rx).ravel().tolist())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,6 +72,15 @@ def main(argv: list[str] | None = None) -> int:
         help="0..0.3: grow buildable space outward beyond the input shape",
     )
     parser.add_argument("--rmin", type=float, default=2.0, help="filter radius in voxels")
+    parser.add_argument(
+        "--min-feature", type=float, default=1.0, dest="min_feature_mm",
+        help="printability: minimum strut/pad thickness in mm (assumes mm STL)",
+    )
+    parser.add_argument(
+        "--rotate", default="", metavar="X,Y,Z",
+        help="rotate the input by these degrees about x, y, z (applied in order), "
+             "e.g. --rotate 90,0,-90",
+    )
     parser.add_argument("--max-iter", type=int, default=60, help="max SIMP iterations")
     parser.add_argument(
         "--no-upsample", action="store_true",
@@ -80,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         shape_preserve=args.shape_preserve,
         domain_expand=args.domain_expand,
         rmin=args.rmin,
+        min_feature_mm=args.min_feature_mm,
+        rotation=_rotation_json(args.rotate),
         max_iter=args.max_iter,
         upsample=not args.no_upsample,
         taubin_iterations=args.smooth_iter,

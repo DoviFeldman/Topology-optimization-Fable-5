@@ -43,6 +43,9 @@
   label span[title] { cursor: help; opacity: .7; }
   #bclegend { position: absolute; top: 14px; right: 14px; z-index: 5; font-size: 11.5px; color: var(--muted); background: rgba(24,29,37,.85); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; display: none; line-height: 1.6; backdrop-filter: blur(4px); }
   #bclegend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  #rotbar { position: absolute; top: 52px; left: 14px; z-index: 5; display: flex; gap: 4px; align-items: center; background: rgba(24,29,37,.85); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; backdrop-filter: blur(4px); }
+  #rotbar span { font-size: 11px; color: var(--muted); margin-right: 2px; }
+  #rotbar button { padding: 3px 7px; font-size: 11px; font-weight: 600; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
   #bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
   #barfill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .4s; }
   #phase { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
@@ -148,6 +151,10 @@
       <label>Resolution (detail) <b id="resv">96</b> <span title="Voxels along the longest axis. Higher = finer struts but much slower. 48-64 for drafts, 96+ for final quality. Struts can never be thinner than a voxel — webbing needs resolution.">ⓘ</span></label>
       <input type="range" id="res" min="24" max="160" step="8" value="96">
     </div>
+    <div>
+      <label>Min strut thickness <b id="minfv">1.0 mm</b> <span title="Printability guard: no strut or wall thinner than this, and the anchor/force contact pads are kept at least this thick and fully solid. Assumes your STL units are millimeters.">ⓘ</span></label>
+      <input type="range" id="minf" min="0" max="3" step="0.25" value="1">
+    </div>
   </div>
 
   <details>
@@ -162,7 +169,11 @@
       <i>Internal webbing</i> and/or <i>Keep outer shape</i>.<br>
       <b>Whole shape vanished?</b> Raise <i>Keep outer shape</i>: it puts a floor
       under the surface skin so your silhouette survives.<br>
-      <b>Webs too chunky?</b> More <i>Resolution</i>, less <i>Keep material</i>.
+      <b>Webs too chunky?</b> More <i>Resolution</i>, less <i>Keep material</i>.<br>
+      <b>Contact surfaces are sacred:</b> the blue anchor faces and the orange
+      force spot always keep a flat, solid pad (at least <i>min strut</i> thick)
+      — the part still sits flat and bolts on exactly like the original; only
+      the material <i>between</i> the pads gets carved.
     </div>
   </details>
 
@@ -182,6 +193,12 @@
   <div id="viewtabs">
     <div class="tab active" id="tabInput">Input</div>
     <div class="tab hidden" id="tabResult">Result</div>
+  </div>
+  <div id="rotbar" title="Rotate the model in 90° steps about its own x/y/z axes (z = up). The rotated orientation is what gets optimized.">
+    <span>rotate</span>
+    <button data-rot="x,1">X+</button><button data-rot="x,-1">X−</button>
+    <button data-rot="y,1">Y+</button><button data-rot="y,-1">Y−</button>
+    <button data-rot="z,1">Z+</button><button data-rot="z,-1">Z−</button>
   </div>
   <div id="canvas3d"></div>
   <div id="bclegend">
@@ -329,6 +346,8 @@ fileInput.addEventListener('change', () => { if (fileInput.files.length) acceptF
 function acceptFile(f) {
   if (!/\.stl$/i.test(f.name)) { setStatus('Please choose an .stl file', true); return; }
   currentFile = f;
+  rotAccum.identity();
+  rotated = false;
   document.getElementById('fileinfo').textContent =
     `${f.name} (${(f.size / 1048576).toFixed(1)} MB)`;
   runBtn.disabled = false;
@@ -362,8 +381,38 @@ const STYLES = {
 };
 let preset = 'bridge', rmin = 1.8, loadCases = 3;
 const shape = document.getElementById('shape'), expand = document.getElementById('expand');
+const minf = document.getElementById('minf');
 shape.addEventListener('input', () => document.getElementById('shapev').textContent = shape.value + '%');
 expand.addEventListener('input', () => document.getElementById('expandv').textContent = expand.value + '%');
+minf.addEventListener('input', () => document.getElementById('minfv').textContent = (+minf.value).toFixed(2).replace(/0$/, '') + ' mm');
+
+// ---------- model rotation (baked into the geometry, sent to the server) ----------
+const rotAccum = new THREE.Matrix4();
+let rotated = false;
+function rotateModel(axis, sign) {
+  if (!inputMesh) return;
+  const m = new THREE.Matrix4();
+  const ang = sign * Math.PI / 2;
+  if (axis === 'x') m.makeRotationX(ang);
+  else if (axis === 'y') m.makeRotationY(ang);
+  else m.makeRotationZ(ang);
+  const g = inputMesh.geometry;
+  g.applyMatrix4(m);
+  g.computeVertexNormals();
+  g.computeBoundingBox();
+  rotAccum.premultiply(m);
+  rotated = true;
+  frameObject(inputMesh);
+  updateBCOverlay();
+}
+document.querySelectorAll('#rotbar button').forEach(b => b.addEventListener('click', () => {
+  const [axis, sign] = b.dataset.rot.split(',');
+  rotateModel(axis, +sign);
+}));
+function rotationRowMajor() {
+  const e = rotAccum.elements;  // THREE stores column-major
+  return [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
+}
 
 function setWebChips(cases) {
   loadCases = cases;
@@ -450,6 +499,8 @@ runBtn.addEventListener('click', async () => {
   fd.append('shape_preserve', (shape.value / 100).toString());
   fd.append('domain_expand', (expand.value / 100).toString());
   fd.append('rmin', rmin.toString());
+  fd.append('min_feature_mm', minf.value);
+  if (rotated) fd.append('rotation', JSON.stringify(rotationRowMajor()));
   runBtn.disabled = true;
   dlBtn.style.display = 'none';
   document.getElementById('tabResult').classList.add('hidden');
